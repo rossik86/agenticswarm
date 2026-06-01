@@ -128,4 +128,6 @@ def test_dashboard_reads_agent_settings_from_config() -> None:
 
     assert settings["display_name"] == "Neutral Analyst Arbiter"
     assert "analysis" in settings["skills"]
+    assert settings["skill_markdowns"][0]["path"] == "skills\\analysis.md" or settings["skill_markdowns"][0]["path"] == "skills/analysis.md"
+    assert "balanced analysis" in settings["skill_markdowns"][0]["content"]
     assert "You are the neutral analyst" in settings["prompt"]

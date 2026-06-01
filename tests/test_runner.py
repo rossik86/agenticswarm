@@ -4,7 +4,7 @@ import asyncio
 import sys
 from pathlib import Path
 
-from app.agents.runner import AgentRunner, _codex_usage
+from app.agents.runner import AgentRunner, _codex_usage, _compose_instructions, load_skill_markdowns
 from app.config.loader import load_config
 
 
@@ -44,3 +44,16 @@ def test_openhands_provider_uses_configured_subprocess() -> None:
 
 def test_codex_usage_parser_handles_grouped_numbers() -> None:
     assert _codex_usage("tokens used\n10\u00a0248") == {"total_tokens": 10248, "source": "codex_cli"}
+
+
+def test_agent_instructions_include_markdown_skill_files() -> None:
+    project_root = Path(__file__).resolve().parents[1]
+    config = load_config(project_root / "configs" / "agents.yaml")
+
+    docs = load_skill_markdowns(project_root, config.agents["analyst_neutral"].skills)
+    instructions = _compose_instructions(project_root, config.agents["analyst_neutral"], "Base prompt")
+
+    assert any(doc["name"] == "analysis" for doc in docs)
+    assert "Skill labels: analysis, clarification, specification" in instructions
+    assert "Source: skills" in instructions
+    assert "balanced analysis" in instructions

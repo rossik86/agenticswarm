@@ -1062,6 +1062,33 @@ button {
   overflow: auto;
 }
 
+.skill-doc-list {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.skill-doc {
+  border: 1px solid #dbe3ec;
+  border-radius: 8px;
+  background: #fff;
+  overflow: hidden;
+}
+
+.skill-doc header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 10px;
+  border-bottom: 1px solid #e4ebf2;
+  background: #f3f7fb;
+}
+
+.skill-doc header span {
+  color: #66768a;
+  font-size: 12px;
+}
+
 .prompt-section pre {
   margin: 0;
   padding: 12px;

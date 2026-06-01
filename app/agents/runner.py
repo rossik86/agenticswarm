@@ -58,7 +58,7 @@ class AgentRunner:
 
         agent = Agent(
             name=agent_name,
-            instructions=_compose_instructions(agent_config, prompt),
+            instructions=_compose_instructions(self.project_root, agent_config, prompt),
             model=model,
             model_settings=ModelSettings(temperature=temperature),
             tools=build_tools(agent_config.tools),
@@ -77,7 +77,7 @@ class AgentRunner:
         cli_config = self.config.codex_cli
         full_prompt = "\n\n".join(
             [
-                _compose_instructions(agent_config, prompt),
+                _compose_instructions(self.project_root, agent_config, prompt),
                 "You are running as one specialist inside a parent multi-agent runtime.",
                 "Return only the requested content. Do not ask interactive follow-up questions.",
                 "Task input:",
@@ -119,7 +119,7 @@ class AgentRunner:
         cli_config = self.config.openhands
         full_prompt = "\n\n".join(
             [
-                _compose_instructions(agent_config, prompt),
+                _compose_instructions(self.project_root, agent_config, prompt),
                 "You are running as the OpenHands-backed software agent inside a parent multi-agent runtime.",
                 "Return concise implementation results or a clear failure reason.",
                 "Task input:",
@@ -213,12 +213,38 @@ def _usage_value(usage: Any, *names: str) -> int | None:
     return None
 
 
-def _compose_instructions(agent_config: AgentConfig, prompt: str) -> str:
+def load_skill_markdowns(project_root: Path, skill_names: list[str]) -> list[dict[str, str]]:
+    root = project_root.resolve()
+    skill_root = (project_root / "skills").resolve()
+    docs = []
+    for skill_name in skill_names:
+        path = (skill_root / f"{skill_name}.md").resolve()
+        if root not in path.parents and path != root:
+            continue
+        if not path.exists() or not path.is_file():
+            continue
+        docs.append(
+            {
+                "name": skill_name,
+                "path": str(path.relative_to(root)),
+                "content": path.read_text(encoding="utf-8").strip(),
+            }
+        )
+    return docs
+
+
+def _compose_instructions(project_root: Path, agent_config: AgentConfig, prompt: str) -> str:
     parts = []
     if agent_config.description:
         parts.append(f"Agent description: {agent_config.description}")
     if agent_config.skills:
-        parts.append("Skills: " + ", ".join(agent_config.skills))
+        parts.append("Skill labels: " + ", ".join(agent_config.skills))
+    skill_docs = load_skill_markdowns(project_root, agent_config.skills)
+    if skill_docs:
+        rendered_docs = "\n\n".join(
+            f"## {doc['name']}\nSource: {doc['path']}\n\n{doc['content']}" for doc in skill_docs
+        )
+        parts.append("Skill markdowns loaded for this agent:\n\n" + rendered_docs)
     parts.append(prompt)
     return "\n\n".join(parts)
 

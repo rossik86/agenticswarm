@@ -647,7 +647,7 @@ function AgentSettingsModal({ settings, onClose }) {
             ))}
           </section>
           <section>
-            <h3>Skills</h3>
+            <h3>Skill labels</h3>
             <TagList values={settings.skills || []} empty="Brak skills." />
             <h3>Tools</h3>
             <TagList values={settings.tools || []} empty="Brak tools." />
@@ -656,6 +656,22 @@ function AgentSettingsModal({ settings, onClose }) {
           </section>
         </div>
         <section className="prompt-section">
+          <h3>Skill markdowns</h3>
+          <div className="skill-doc-list">
+            {(settings.skill_markdowns || []).length ? (
+              settings.skill_markdowns.map((skill) => (
+                <article className="skill-doc" key={skill.path || skill.name}>
+                  <header>
+                    <strong>{skill.name}</strong>
+                    <span>{skill.path}</span>
+                  </header>
+                  <pre>{skill.content}</pre>
+                </article>
+              ))
+            ) : (
+              <p className="muted">Brak plików markdown dla skills tego agenta.</p>
+            )}
+          </div>
           <h3>Prompt</h3>
           <pre>{settings.prompt || "Brak promptu."}</pre>
         </section>

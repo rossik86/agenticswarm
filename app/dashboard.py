@@ -13,6 +13,7 @@ import threading
 from urllib.parse import parse_qs, quote, urlparse
 from zoneinfo import ZoneInfo
 
+from app.agents.runner import load_skill_markdowns
 from app.config.loader import load_config
 
 
@@ -272,7 +273,7 @@ def read_agent_settings(project_root: Path, config: object, agent_name: str) -> 
     agents = getattr(config, "agents", {})
     agent = agents.get(agent_name) if isinstance(agents, dict) else None
     if not agent:
-        return {"name": agent_name, "status": "not_found", "prompt": "", "skills": [], "tools": []}
+        return {"name": agent_name, "status": "not_found", "prompt": "", "skills": [], "skill_markdowns": [], "tools": []}
     prompt_path = getattr(agent, "prompt", None)
     prompt_text = ""
     if prompt_path:
@@ -286,6 +287,7 @@ def read_agent_settings(project_root: Path, config: object, agent_name: str) -> 
         "description": getattr(agent, "description", ""),
         "type": getattr(agent, "type", ""),
         "skills": getattr(agent, "skills", []),
+        "skill_markdowns": load_skill_markdowns(project_root, getattr(agent, "skills", [])),
         "tools": getattr(agent, "tools", []),
         "delegates_to": getattr(agent, "delegates_to", []),
         "validates": getattr(agent, "validates", []),
