@@ -14,7 +14,7 @@ ObservabilityBackend = Literal["local", "agentops"]
 
 class LlmDefaults(BaseModel):
     provider: ProviderType = "agents_sdk"
-    model: str = "gpt-4.1"
+    model: str = "gpt-5.4-mini"
     temperature: float = 0.2
 
 

@@ -47,15 +47,15 @@ def test_codex_usage_parser_handles_grouped_numbers() -> None:
 
 
 def test_codex_cli_args_include_agent_model() -> None:
-    assert _codex_args_with_model("codex", ["exec", "--skip-git-repo-check", "-"], "gpt-5-codex") == [
+    assert _codex_args_with_model("codex", ["exec", "--skip-git-repo-check", "-"], "gpt-5.4-mini") == [
         "exec",
         "--model",
-        "gpt-5-codex",
+        "gpt-5.4-mini",
         "--skip-git-repo-check",
         "-",
     ]
-    assert _codex_args_with_model("codex", ["exec", "--model", "o3", "-"], "gpt-5-codex") == ["exec", "--model", "o3", "-"]
-    assert _codex_args_with_model(sys.executable, ["-c", "print('ok')"], "gpt-5-codex") == ["-c", "print('ok')"]
+    assert _codex_args_with_model("codex", ["exec", "--model", "gpt-5.5", "-"], "gpt-5.4-mini") == ["exec", "--model", "gpt-5.5", "-"]
+    assert _codex_args_with_model(sys.executable, ["-c", "print('ok')"], "gpt-5.4-mini") == ["-c", "print('ok')"]
 
 
 def test_agent_instructions_include_markdown_skill_files() -> None:

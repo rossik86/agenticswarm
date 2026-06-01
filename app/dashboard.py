@@ -360,9 +360,9 @@ def update_agent_runtime_settings(config_path: Path, payload: dict[str, object])
 
 def model_options_for_provider(provider: str) -> list[str]:
     options: dict[str, list[str]] = {
-        "agents_sdk": ["gpt-4.1", "gpt-4.1-mini", "o4-mini", "o3"],
-        "codex_cli": ["gpt-5", "gpt-5-codex", "gpt-4.1", "o4-mini"],
-        "openhands": ["gpt-4.1", "gpt-4.1-mini", "claude-sonnet-4", "local"],
+        "agents_sdk": ["gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.3-codex", "gpt-5.3-codex-spark", "gpt-5.2"],
+        "codex_cli": ["gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.3-codex", "gpt-5.3-codex-spark", "gpt-5.2"],
+        "openhands": ["gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.3-codex", "gpt-5.3-codex-spark", "gpt-5.2", "local"],
     }
     return options.get(provider, [])
 

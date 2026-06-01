@@ -129,7 +129,7 @@ def test_dashboard_reads_agent_settings_from_config() -> None:
 
     assert settings["display_name"] == "Neutral Analyst Arbiter"
     assert settings["effective_provider"] == "agents_sdk"
-    assert settings["effective_model"] == "gpt-4.1"
+    assert settings["effective_model"] == "gpt-5.4-mini"
     assert "analysis" in settings["skills"]
     assert settings["skill_markdowns"][0]["path"] == "skills\\analysis.md" or settings["skill_markdowns"][0]["path"] == "skills/analysis.md"
     assert "balanced analysis" in settings["skill_markdowns"][0]["content"]
@@ -143,11 +143,11 @@ def test_dashboard_updates_agent_runtime_settings(tmp_path: Path) -> None:
 
     result = update_agent_runtime_settings(
         config_path,
-        {"agent": "builder", "provider": "codex_cli", "model": "gpt-5-codex", "temperature": "0.3"},
+        {"agent": "builder", "provider": "codex_cli", "model": "gpt-5.3-codex", "temperature": "0.3"},
     )
     config = load_config(config_path)
 
     assert result["updated"] is True
     assert config.agents["builder"].provider == "codex_cli"
-    assert config.agents["builder"].model == "gpt-5-codex"
+    assert config.agents["builder"].model == "gpt-5.3-codex"
     assert config.agents["builder"].temperature == 0.3

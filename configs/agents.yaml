@@ -1,6 +1,6 @@
 defaults:
   provider: agents_sdk
-  model: gpt-4.1
+  model: gpt-5.4-mini
   temperature: 0.2
 
 codex_cli:
@@ -43,7 +43,7 @@ agents:
       - conversation
       - delegation
       - synthesis
-    model: gpt-4.1
+    model: gpt-5.4-mini
     temperature: 0.2
     prompt: prompts/main.md
     tools: []
@@ -58,7 +58,7 @@ agents:
       - planning
       - routing
       - task_decomposition
-    model: gpt-4.1
+    model: gpt-5.4-mini
     temperature: 0.2
     prompt: prompts/supervisor.md
     tools:
@@ -79,7 +79,7 @@ agents:
       - analysis
       - clarification
       - specification
-    model: gpt-4.1
+    model: gpt-5.4-mini
     temperature: 0.2
     prompt: prompts/analyst_neutral.md
     tools:
@@ -94,7 +94,7 @@ agents:
       - opportunity_analysis
       - constructive_planning
       - superpower
-    model: gpt-4.1
+    model: gpt-5.4-mini
     temperature: 0.2
     prompt: prompts/analyst_positive.md
     tools:
@@ -109,7 +109,7 @@ agents:
       - grill_me
       - risk_analysis
       - adversarial_review
-    model: gpt-4.1
+    model: gpt-5.4-mini
     temperature: 0.1
     prompt: prompts/analyst_negative.md
     tools:
@@ -124,7 +124,7 @@ agents:
       - research
       - specification
       - risk_analysis
-    model: gpt-4.1-mini
+    model: gpt-5.4-mini
     temperature: 0.2
     prompt: prompts/researcher.md
     tools:
@@ -139,7 +139,7 @@ agents:
       - research_grilling
       - source_validation
       - completeness_check
-    model: gpt-4.1-mini
+    model: gpt-5.4-mini
     temperature: 0.1
     prompt: prompts/researcher_negative.md
     tools:
@@ -155,7 +155,7 @@ agents:
       - tdd_bdd
       - ux_ui
       - tool_use
-    model: gpt-4.1
+    model: gpt-5.4-mini
     temperature: 0.1
     prompt: prompts/builder.md
     tools:
@@ -170,7 +170,7 @@ agents:
       - review
       - validation
       - quality_control
-    model: gpt-4.1
+    model: gpt-5.4-mini
     temperature: 0.1
     prompt: prompts/reviewer.md
     tools:
@@ -188,7 +188,7 @@ agents:
       - quality_gate
       - security_review
       - adversarial_testing
-    model: gpt-4.1
+    model: gpt-5.4-mini
     temperature: 0.1
     prompt: prompts/reviewer_negative.md
     tools:
@@ -205,7 +205,7 @@ agents:
       - quality_superpowers
       - programming_principles
       - constructive_review
-    model: gpt-4.1
+    model: gpt-5.4-mini
     temperature: 0.1
     prompt: prompts/reviewer_positive.md
     tools:
