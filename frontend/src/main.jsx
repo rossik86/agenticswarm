@@ -373,7 +373,7 @@ function Inspector({
 }) {
   if (selectedAgent) {
     const agentEvents = events.filter((event) => String(event.event || "").includes(selectedAgent.name));
-    const agentCheckpoints = checkpoints.filter((checkpoint) => belongsToRoom(checkpoint, selectedAgent.role));
+    const agentCheckpoints = checkpoints.filter((checkpoint) => belongsToAgent(checkpoint, selectedAgent));
     return (
       <aside className="inspector">
         <PanelTitle
@@ -386,7 +386,7 @@ function Inspector({
         <AgentOptions agent={selectedAgent} onOpenAgentSettings={onOpenAgentSettings} />
         {selectedAgent.status === "failed" ? <ErrorCallout error={selectedAgent.error || selectedAgent.summary} /> : null}
         <CompactField label="Summary" value={selectedAgent.summary || selectedAgent.error || "-"} onOpen={onOpenText} />
-        <ArtifactLink path={selectedAgent.artifact_path} />
+        <ArtifactList artifacts={agentArtifacts(status, selectedAgent)} empty="Brak artefaktów tego agenta w tym runie." />
         <CheckpointList checkpoints={agentCheckpoints} onAction={onCheckpointAction} pendingCheckpoint={pendingCheckpoint} />
         <Timeline events={agentEvents} />
       </aside>
@@ -397,14 +397,20 @@ function Inspector({
   const roomEvents = events.filter((event) => room?.agents?.some((agent) => String(event.event || "").includes(agent.name)));
   const roomCheckpoints = checkpoints.filter((checkpoint) => belongsToRoom(checkpoint, room?.role));
   const roomIo = room?.role ? status?.room_io?.[room.role] : null;
+  const isMainRoom = room?.role === "main";
   return (
     <aside className="inspector">
       <PanelTitle icon={<Boxes size={17} />} title={room?.label || "Office"} subtitle={status?.run_id || "no-run"} />
-      <CompactField label="Wejście pokoju" value={roomIo?.input || status?.user_input || status?.message || "-"} onOpen={onOpenText} />
-      <CompactField label="Wyjście pokoju" value={roomIo?.output || roomOutput(room) || status?.final_answer || "-"} onOpen={onOpenText} />
-      <RunIOPanel status={status} onOpen={onOpenText} />
-      <ResultPanel status={status} onOpen={onOpenText} />
-      <TokenUsagePanel usage={status?.token_usage} selectedRole={room?.role} />
+      {isMainRoom ? (
+        <RunIOPanel status={status} onOpen={onOpenText} />
+      ) : (
+        <>
+          <CompactField label="Wejście pokoju" value={roomIo?.input || "-"} onOpen={onOpenText} />
+          <CompactField label="Wyjście pokoju" value={roomIo?.output || roomOutput(room) || "-"} onOpen={onOpenText} />
+        </>
+      )}
+      <ResultPanel status={status} room={room} onOpen={onOpenText} />
+      <TokenUsagePanel usage={status?.token_usage} selectedRole={room?.role} agents={room?.agents || []} showAllRoles={isMainRoom} />
       <CouncilList room={room} />
       <RoomHistory roomIo={roomIo} onOpen={onOpenText} />
       <CheckpointList checkpoints={roomCheckpoints} onAction={onCheckpointAction} pendingCheckpoint={pendingCheckpoint} />
@@ -595,59 +601,65 @@ function CompactField({ label, value, onOpen, limit = 220 }) {
   );
 }
 
-function ResultPanel({ status, onOpen }) {
-  const artifacts = collectArtifacts(status);
+function ResultPanel({ status, room, onOpen }) {
+  const artifacts = room?.role === "main" ? collectArtifacts(status) : roomArtifacts(status, room);
   const finalAnswer = status?.final_answer;
   return (
     <section className="panel-section result-panel">
       <h2>Wynik pracy</h2>
-      {finalAnswer ? (
+      {room?.role === "main" && finalAnswer ? (
         <CompactField label="Final" value={finalAnswer} onOpen={onOpen} limit={180} />
       ) : (
-        <p className="muted">Brak finalnej odpowiedzi dla aktualnego runa.</p>
+        <p className="muted">{artifacts.length ? "Artefakty agentów w tym pokoju." : "Brak artefaktów dla tego pokoju w aktualnym runie."}</p>
       )}
-      {artifacts.length ? (
-        <div className="artifact-list">
-          {artifacts.map((artifact, index) => (
-            <a
-              key={`${artifact.artifact_path}-${index}`}
-              href={`/artifact?path=${encodeURIComponent(artifact.artifact_path)}`}
-              target="_blank"
-              rel="noreferrer"
-            >
-              {artifact.agent || `artifact-${index + 1}`}
-            </a>
-          ))}
-        </div>
-      ) : null}
+      <ArtifactList artifacts={artifacts} empty="Brak artefaktów." />
     </section>
   );
 }
 
-function TokenUsagePanel({ usage, selectedRole }) {
+function TokenUsagePanel({ usage, selectedRole, agents = [], showAllRoles = false }) {
   const total = usage?.total_tokens || 0;
   const roles = usage?.by_role || {};
+  const byAgent = usage?.by_agent || {};
   const roleEntries = Object.entries(roles);
+  const selectedRoleUsage = roles[selectedRole] || {};
+  const agentEntries = agents.map((agent) => [agent.name, byAgent[agent.name] || agent.token_usage || {}]);
   return (
     <section className="panel-section token-panel">
       <h2>Token usage</h2>
       <div className="token-total">
-        <strong>{formatNumber(total)}</strong>
-        <span>{usage?.calls || 0} calls</span>
+        <strong>{formatNumber(showAllRoles ? total : selectedRoleUsage.total_tokens || 0)}</strong>
+        <span>{showAllRoles ? usage?.calls || 0 : selectedRoleUsage.calls || 0} calls</span>
       </div>
-      <div className="token-rooms">
-        {roleEntries.length ? (
+      {showAllRoles ? (
+        <div className="token-rooms">
+          {roleEntries.length ? (
           roleEntries.map(([role, roleUsage]) => (
             <div className={`token-room ${role === selectedRole ? "selected" : ""}`} key={role}>
               <span>{role}</span>
               <strong>{formatNumber(roleUsage.total_tokens || 0)}</strong>
-              <small>{roleUsage.calls || 0} calls</small>
+              <small>{roleUsage.calls || 0} calls · in {formatNumber(roleUsage.input_tokens || 0)} / out {formatNumber(roleUsage.output_tokens || 0)}</small>
             </div>
           ))
-        ) : (
-          <p className="muted">Brak danych token usage dla tego runu.</p>
-        )}
-      </div>
+          ) : (
+            <p className="muted">Brak danych token usage dla tego runu.</p>
+          )}
+        </div>
+      ) : (
+        <div className="token-rooms">
+          {agentEntries.length ? (
+            agentEntries.map(([agentName, agentUsage]) => (
+              <div className="token-room" key={agentName}>
+                <span>{displayAgentName({ name: agentName })}</span>
+                <strong>{formatNumber(agentUsage.total_tokens || 0)}</strong>
+                <small>{agentUsage.calls || 0} calls · in {formatNumber(agentUsage.input_tokens || 0)} / out {formatNumber(agentUsage.output_tokens || 0)}</small>
+              </div>
+            ))
+          ) : (
+            <p className="muted">Brak danych token usage dla tego pokoju.</p>
+          )}
+        </div>
+      )}
     </section>
   );
 }
@@ -796,12 +808,22 @@ function TagList({ values, empty }) {
   );
 }
 
-function ArtifactLink({ path }) {
-  if (!path) return null;
-  return (
-    <a className="artifact-link" href={`/artifact?path=${encodeURIComponent(path)}`} target="_blank" rel="noreferrer">
-      Otwórz artefakt
-    </a>
+function ArtifactList({ artifacts, empty }) {
+  return artifacts?.length ? (
+    <div className="artifact-list">
+      {artifacts.map((artifact, index) => (
+        <a
+          key={`${artifact.artifact_path}-${index}`}
+          href={`/artifact?path=${encodeURIComponent(artifact.artifact_path)}`}
+          target="_blank"
+          rel="noreferrer"
+        >
+          {displayAgentName({ name: artifact.agent }) || `artifact-${index + 1}`}
+        </a>
+      ))}
+    </div>
+  ) : (
+    <p className="muted">{empty}</p>
   );
 }
 
@@ -825,6 +847,15 @@ function collectArtifacts(status) {
     artifacts.push(artifact);
   }
   return artifacts;
+}
+
+function agentArtifacts(status, agent) {
+  return collectArtifacts(status).filter((artifact) => artifact.agent === agent?.name);
+}
+
+function roomArtifacts(status, room) {
+  const agentNames = new Set((room?.agents || []).map((agent) => agent.name));
+  return collectArtifacts(status).filter((artifact) => agentNames.has(artifact.agent));
 }
 
 function shortName(name) {
@@ -852,6 +883,20 @@ function belongsToRoom(checkpoint, role) {
   if (role === "builder") return node.includes("build");
   if (role === "reviewer") return node.includes("review");
   if (role === "supervisor") return node.includes("supervisor");
+  return false;
+}
+
+function belongsToAgent(checkpoint, agent) {
+  if (!agent) return false;
+  const node = String(checkpoint.node || "");
+  const name = String(agent.name || "");
+  if (node.includes(name)) return true;
+  if (name === "main") return node.includes("main") || node.includes("final");
+  if (name === "supervisor") return node.includes("supervisor");
+  if (name === "builder") return node.includes("build");
+  if (name === "researcher") return node.includes("research");
+  if (name === "reviewer") return node.includes("review");
+  if (name.endsWith("_neutral")) return node.includes(agent.role);
   return false;
 }
 
