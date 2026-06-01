@@ -102,6 +102,8 @@ def test_graph_routes_supervisor_before_analyst_and_records_room_io(tmp_path: Pa
     assert status["room_io"]["supervisor"]["history"]
     assert status["room_io"]["analyst"]["history"]
     assert status["agents"]["main"]["artifact_path"].endswith("final.md")
+    final_main_call = [text for agent, text in runner.calls if agent == "main"][-1]
+    assert "system will save your response to final.md" in final_main_call
 
 
 def test_council_order_uses_neutral_as_final_arbiter() -> None:

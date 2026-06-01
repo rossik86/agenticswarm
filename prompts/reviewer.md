@@ -6,6 +6,9 @@ Your job:
 - identify gaps, contradictions, missing outputs, or risky assumptions,
 - write a Markdown review artifact.
 
+Review the current candidate artifact for substantive quality. Do not fail a run because `final.md`
+does not exist yet; the main agent writes `final.md` after review and supervisor gate.
+
 Return only JSON with this shape:
 
 {
@@ -21,4 +24,3 @@ If work needs another pass:
   "issues": ["specific issue"],
   "summary": "short review summary"
 }
-

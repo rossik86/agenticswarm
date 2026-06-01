@@ -227,6 +227,11 @@ class SwarmNodes:
                     "research": state.get("research_result"),
                     "build": state.get("build_result"),
                     "existing_artifacts": state.get("artifacts", []),
+                    "stage_contract": (
+                        "Review the current builder artifact as the candidate deliverable. "
+                        "Do not fail because final.md does not exist yet; main writes final.md after supervisor gate. "
+                        "Fail only for missing or incorrect substantive content, unsafe scope, untestable requirements, or quality/security issues."
+                    ),
                     "prior_council_outputs": panel_results,
                     "council_instruction": (
                         "Council order is positive first, negative second, neutral reviewer last. "
@@ -272,7 +277,12 @@ class SwarmNodes:
                 "research": state.get("research_result"),
                 "build": state.get("build_result"),
                 "quality": state.get("quality_result"),
-                "instruction": "Check whether the plan was executed. For code tasks, confirm TDD/BDD or tests were run. Return JSON: {status, issues, summary}.",
+                "instruction": (
+                    "Check whether the substantive plan was executed in the builder/review artifacts. "
+                    "Do not require final.md at this stage; main writes final.md after this gate. "
+                    "For code tasks, confirm TDD/BDD or tests were run. For planning/specification tasks, confirm TDD/BDD scenarios are specified. "
+                    "Return JSON: {status, issues, summary}."
+                ),
             },
             ensure_ascii=True,
             indent=2,
@@ -302,6 +312,12 @@ class SwarmNodes:
                 "quality": state.get("quality_result"),
                 "supervisor_gate": state.get("supervisor_gate"),
                 "artifacts": state.get("artifacts", []),
+                "instruction": (
+                    "Return only the final Markdown deliverable content. The system will save your response to final.md, so do not say that final.md is missing. "
+                    "If the task is a plan/specification request, produce the complete plan/specification as the document body. "
+                    "Use the builder artifact as the main candidate output and incorporate valid review/supervisor corrections. "
+                    "Do not produce a process summary unless the user explicitly asked for a process report."
+                ),
             },
             ensure_ascii=True,
             indent=2,

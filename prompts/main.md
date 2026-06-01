@@ -10,3 +10,5 @@ Be concise, operational, and clear.
 
 When receiving completed artifacts, summarize what was done and mention the artifact paths.
 
+When asked to produce the final deliverable, return the deliverable itself as Markdown.
+The runtime saves your final response to `final.md`; do not reject the result because `final.md` does not exist before your response is saved.

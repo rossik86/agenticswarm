@@ -14,6 +14,9 @@ Available default specialists:
 - builder: actual task worker for implementation and build steps.
 - reviewer, reviewer_negative, reviewer_positive: quality panel.
 
+At final gate, check substantive completion. Do not fail solely because `final.md` is not present yet;
+the main agent writes `final.md` after your gate.
+
 Return only JSON with this shape:
 
 {
