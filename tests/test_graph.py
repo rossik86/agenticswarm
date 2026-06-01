@@ -72,6 +72,36 @@ def test_graph_writes_specialist_and_review_artifacts(tmp_path: Path) -> None:
     assert (tmp_path / "runs" / "test-run" / "researcher.md").exists()
     assert (tmp_path / "runs" / "test-run" / "builder.md").exists()
     assert (tmp_path / "runs" / "test-run" / "review.md").exists()
+    assert (tmp_path / "runs" / "test-run" / "final.md").exists()
+
+
+def test_graph_routes_supervisor_before_analyst_and_records_room_io(tmp_path: Path) -> None:
+    project_root = Path(__file__).resolve().parents[1]
+    config = load_config(project_root / "configs" / "agents.yaml")
+    config.artifact_root = Path("runs")
+    artifacts = ArtifactManager(tmp_path, config.artifact_root)
+    artifacts.start_run("route-run", "Prepare lotto plan", list(config.agents))
+    runner = FakeRunner()
+    graph = build_graph(project_root, config, runner, artifacts)
+    initial_state = {
+        "run_id": "route-run",
+        "user_input": "Prepare lotto plan",
+        "memory_context": "",
+        "messages": [{"role": "user", "content": "Prepare lotto plan"}],
+        "artifacts": [],
+        "specialist_results": [],
+        "errors": [],
+        "review_attempts": 0,
+    }
+
+    asyncio.run(graph.ainvoke(initial_state))
+    calls = [agent for agent, _ in runner.calls]
+    status = artifacts.read_status("route-run")
+
+    assert calls.index("supervisor") < calls.index("analyst_positive")
+    assert status["room_io"]["supervisor"]["history"]
+    assert status["room_io"]["analyst"]["history"]
+    assert status["agents"]["main"]["artifact_path"].endswith("final.md")
 
 
 def test_council_order_uses_neutral_as_final_arbiter() -> None:

@@ -839,6 +839,7 @@ button {
 
 .agent-list,
 .checkpoint-list,
+.room-history,
 .timeline {
   display: grid;
   gap: 8px;
@@ -885,6 +886,31 @@ button {
 
 .checkpoint {
   grid-template-columns: 1fr auto;
+}
+
+.room-history button {
+  display: grid;
+  gap: 3px;
+  width: 100%;
+  padding: 8px;
+  border: 1px solid #dbe3ec;
+  border-radius: 8px;
+  background: #fff;
+  color: #172433;
+  text-align: left;
+  cursor: pointer;
+}
+
+.room-history strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+}
+
+.room-history span {
+  color: #6c7c90;
+  font-size: 11px;
 }
 
 .checkpoint strong,

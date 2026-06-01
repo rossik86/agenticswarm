@@ -48,20 +48,20 @@ def build_graph(
         "main_decision",
         should_delegate,
         {
-            "analyst": "analyst_panel",
+            "supervisor": "supervisor_route",
             "final": "final_response",
         },
     )
-    graph.add_edge("analyst_panel", "supervisor_route")
     graph.add_edge("supervisor_route", "research_panel")
-    graph.add_edge("research_panel", "build_solution")
+    graph.add_edge("research_panel", "analyst_panel")
+    graph.add_edge("analyst_panel", "build_solution")
     graph.add_edge("build_solution", "review_panel")
     graph.add_edge("review_panel", "supervisor_gate")
     graph.add_conditional_edges(
         "supervisor_gate",
         lambda state: should_retry_review(state, config.max_review_retries),
         {
-            "retry": "research_panel",
+            "retry": "analyst_panel",
             "final": "final_response",
         },
     )

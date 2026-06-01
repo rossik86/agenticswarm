@@ -396,15 +396,17 @@ function Inspector({
   const room = selectedRoom;
   const roomEvents = events.filter((event) => room?.agents?.some((agent) => String(event.event || "").includes(agent.name)));
   const roomCheckpoints = checkpoints.filter((checkpoint) => belongsToRoom(checkpoint, room?.role));
+  const roomIo = room?.role ? status?.room_io?.[room.role] : null;
   return (
     <aside className="inspector">
       <PanelTitle icon={<Boxes size={17} />} title={room?.label || "Office"} subtitle={status?.run_id || "no-run"} />
-      <CompactField label="Task" value={status?.user_input || status?.message || "-"} onOpen={onOpenText} />
-      <CompactField label="Output" value={roomOutput(room) || status?.final_answer || "-"} onOpen={onOpenText} />
+      <CompactField label="Wejście pokoju" value={roomIo?.input || status?.user_input || status?.message || "-"} onOpen={onOpenText} />
+      <CompactField label="Wyjście pokoju" value={roomIo?.output || roomOutput(room) || status?.final_answer || "-"} onOpen={onOpenText} />
       <RunIOPanel status={status} onOpen={onOpenText} />
       <ResultPanel status={status} onOpen={onOpenText} />
       <TokenUsagePanel usage={status?.token_usage} selectedRole={room?.role} />
       <CouncilList room={room} />
+      <RoomHistory roomIo={roomIo} onOpen={onOpenText} />
       <CheckpointList checkpoints={roomCheckpoints} onAction={onCheckpointAction} pendingCheckpoint={pendingCheckpoint} />
       <Timeline events={roomEvents.length ? roomEvents : events.slice(-8)} />
     </aside>
@@ -456,6 +458,36 @@ function CouncilList({ room }) {
           </div>
         ))}
       </div>
+    </section>
+  );
+}
+
+function RoomHistory({ roomIo, onOpen }) {
+  const history = roomIo?.history || [];
+  return (
+    <section className="panel-section">
+      <h2>Historia pokoju</h2>
+      {history.length ? (
+        <div className="room-history">
+          {history.slice(-6).reverse().map((entry, index) => (
+            <button
+              type="button"
+              key={`${entry.updated_at}-${index}`}
+              onClick={() =>
+                onOpen({
+                  title: `${entry.room} · ${entry.updated_at}`,
+                  text: `INPUT\n${entry.input || "-"}\n\nOUTPUT\n${entry.output || "-"}`
+                })
+              }
+            >
+              <strong>{entry.summary || entry.room}</strong>
+              <span>{entry.updated_at}</span>
+            </button>
+          ))}
+        </div>
+      ) : (
+        <p className="muted">Brak wejścia/wyjścia dla tego pokoju w aktualnym runie.</p>
+      )}
     </section>
   );
 }

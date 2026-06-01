@@ -40,21 +40,31 @@ class SwarmNodes:
     async def main_decision(self, state: AgentState) -> AgentState:
         run_id = state["run_id"]
         if state.get("accepted_async"):
-            decision = state.get("main_decision") or {"delegate": True, "reason": "Accepted asynchronously and delegated to supervisor."}
+            decision = state.get("main_decision") or {
+                "delegate": True,
+                "delegated_task": state["user_input"],
+                "reason": "Accepted asynchronously and delegated to supervisor.",
+            }
             self.artifacts.update_agent(run_id, "main", "completed", str(decision.get("reason", "Delegated.")))
             update = {"main_decision": decision}
+            self.artifacts.record_room_io(run_id, "main", state["user_input"], decision, str(decision.get("reason", "Delegated.")))
             self._checkpoint(run_id, "main_async_acceptance", {**state, **update})
             return update
         self.artifacts.update_agent(run_id, "main", "running", "Deciding whether to delegate.")
         prompt = (
-            "Decide whether this user request needs specialist work. "
-            "Return JSON: {\"delegate\": true|false, \"reason\": \"...\"}.\n\n"
+            "Decide whether this user request needs specialist work. If it does, pass the user's requested task to supervisor without changing intent. "
+            "Return JSON: {\"delegate\": true|false, \"delegated_task\": \"...\", \"reason\": \"...\"}.\n\n"
             f"{_memory_block(state)}User request:\n{state['user_input']}"
         )
         result = await self._run_agent(run_id, "main", prompt, "agent.main_decision")
-        decision = result.parsed_json or {"delegate": True, "reason": "Defaulting to supervised workflow."}
+        decision = result.parsed_json or {
+            "delegate": True,
+            "delegated_task": state["user_input"],
+            "reason": "Defaulting to supervised workflow.",
+        }
         self.artifacts.update_agent(run_id, "main", "completed", decision.get("reason", "Decision complete."))
         update = {"main_decision": decision}
+        self.artifacts.record_room_io(run_id, "main", state["user_input"], decision, str(decision.get("reason", "Decision complete.")))
         self._checkpoint(run_id, "main_decision", {**state, **update})
         return update
 
@@ -68,12 +78,14 @@ class SwarmNodes:
                 agent_name,
                 {
                     "user_request": state["user_input"],
+                    "supervisor_plan": state.get("plan"),
+                    "research": state.get("research_result"),
                     "memory_context": state.get("memory_context", ""),
                     "panel_role": agent_name,
                     "prior_council_outputs": panel_results,
                     "council_instruction": (
                         "Council order is positive first, negative second, neutral last. "
-                        "If you are the neutral analyst, arbitrate the prior positive and negative positions and decide the final specification."
+                        "If you are the neutral analyst, arbitrate the prior positive and negative positions. Only your agreed specification leaves this room."
                     ),
                 },
                 "Analysis panel",
@@ -84,8 +96,10 @@ class SwarmNodes:
         consensus_input = json.dumps(
             {
                 "user_request": state["user_input"],
+                "supervisor_plan": state.get("plan"),
+                "research": state.get("research_result"),
                 "analyst_outputs": panel_results,
-                "instruction": "Create consensus analysis/specification. Return JSON with keys: questions, specification, risks, recommendation.",
+                "instruction": "Create final agreed analysis/specification for builder. Return JSON with keys: questions, specification, risks, recommendation.",
             },
             ensure_ascii=True,
             indent=2,
@@ -98,6 +112,13 @@ class SwarmNodes:
             "recommendation": "Proceed with supervised workflow.",
         }
         update = {"analysis": analysis, "artifacts": artifacts}
+        self.artifacts.record_room_io(
+            run_id,
+            "analyst",
+            {"supervisor_plan": state.get("plan"), "research": state.get("research_result")},
+            analysis,
+            str(analysis.get("recommendation", "Analysis complete.")),
+        )
         self._checkpoint(run_id, "analyst_panel", {**state, **update})
         return update
 
@@ -106,9 +127,13 @@ class SwarmNodes:
         self.artifacts.update_agent(run_id, "supervisor", "running", "Planning role workflow.")
         supervisor_input = json.dumps(
             {
+                "task_from_main": (state.get("main_decision") or {}).get("delegated_task") or state["user_input"],
                 "user_request": state["user_input"],
-                "analysis": state.get("analysis"),
-                "instruction": "Plan whether research is needed and define builder task. Return JSON with keys: research_needed, research_tasks, builder_task.",
+                "instruction": (
+                    "Break the task into practical points if possible. Decide whether research is needed before analyst specification. "
+                    "For domain tasks like lottery/lotto, request research into rules, context, and constraints. "
+                    "Return JSON with keys: research_needed, research_tasks, preliminary_plan, analyst_task, builder_task."
+                ),
             },
             ensure_ascii=True,
             indent=2,
@@ -117,10 +142,13 @@ class SwarmNodes:
         plan = result.parsed_json or {
             "research_needed": True,
             "research_tasks": [{"title": "Research task", "instructions": state["user_input"]}],
+            "preliminary_plan": [{"title": "Understand task", "instructions": state["user_input"]}],
+            "analyst_task": {"title": "Analyze and specify", "instructions": state["user_input"]},
             "builder_task": {"title": "Build task", "instructions": state["user_input"]},
         }
         self.artifacts.update_agent(run_id, "supervisor", "completed", "Role workflow planned.")
         update = {"plan": plan, "selected_agents": ["researcher", "builder", "reviewer"]}
+        self.artifacts.record_room_io(run_id, "supervisor", supervisor_input, plan, "Initial supervisor plan ready.")
         self._checkpoint(run_id, "supervisor_route", {**state, **update})
         return update
 
@@ -128,6 +156,7 @@ class SwarmNodes:
         run_id = state["run_id"]
         if not (state.get("plan") or {}).get("research_needed", True):
             update = {"research_result": {"skipped": True, "summary": "Supervisor skipped research."}}
+            self.artifacts.record_room_io(run_id, "researcher", state.get("plan"), update["research_result"], "Research skipped.")
             self._checkpoint(run_id, "research_panel", {**state, **update})
             return update
 
@@ -139,7 +168,6 @@ class SwarmNodes:
                 agent_name,
                 {
                     "user_request": state["user_input"],
-                    "analysis": state.get("analysis"),
                     "plan": state.get("plan"),
                     "panel_role": agent_name,
                     "prior_council_outputs": panel_results,
@@ -154,6 +182,7 @@ class SwarmNodes:
             artifacts.append(metadata)
         research_result = {"panel": panel_results, "summary": "; ".join(item["summary"] for item in panel_results)}
         update = {"research_result": research_result, "artifacts": artifacts}
+        self.artifacts.record_room_io(run_id, "researcher", state.get("plan"), research_result, research_result["summary"])
         self._checkpoint(run_id, "research_panel", {**state, **update})
         return update
 
@@ -174,6 +203,13 @@ class SwarmNodes:
         artifacts = [*state.get("artifacts", []), metadata]
         build_result = {"summary": metadata["summary"], "artifact_path": metadata["artifact_path"], "text": result.text[:2000]}
         update = {"build_result": build_result, "artifacts": artifacts}
+        self.artifacts.record_room_io(
+            state["run_id"],
+            "builder",
+            {"analysis": state.get("analysis"), "plan": state.get("plan"), "research": state.get("research_result")},
+            build_result,
+            metadata["summary"],
+        )
         self._checkpoint(state["run_id"], "build_solution", {**state, **update})
         return update
 
@@ -215,6 +251,13 @@ class SwarmNodes:
             "review_attempts": state.get("review_attempts", 0) + 1,
             "artifacts": artifacts,
         }
+        self.artifacts.record_room_io(
+            run_id,
+            "reviewer",
+            {"plan": state.get("plan"), "analysis": state.get("analysis"), "build": state.get("build_result")},
+            quality_result,
+            quality_result["summary"],
+        )
         self._checkpoint(run_id, "review_panel", {**state, **update})
         return update
 
@@ -242,6 +285,7 @@ class SwarmNodes:
         }
         self.artifacts.update_agent(run_id, "supervisor", "completed", gate.get("summary", "Supervisor gate complete."))
         update = {"supervisor_gate": gate}
+        self.artifacts.record_room_io(run_id, "supervisor", gate_input, gate, str(gate.get("summary", "Supervisor gate complete.")))
         self._checkpoint(run_id, "supervisor_gate", {**state, **update})
         return update
 
@@ -263,8 +307,17 @@ class SwarmNodes:
             indent=2,
         )
         result = await self._run_agent(run_id, "main", _with_memory(state, final_input), "agent.final_response")
-        self.artifacts.update_agent(run_id, "main", "completed", "Final answer ready.")
-        update = {"final_answer": result.text}
+        final_artifact = self.artifacts.write_markdown(run_id, "main", "final.md", result.text)
+        metadata = {
+            "agent": "main",
+            "status": "completed",
+            "artifact_path": str(final_artifact.path),
+            "summary": final_artifact.summary,
+        }
+        self.artifacts.add_artifact(run_id, metadata)
+        self.artifacts.update_agent(run_id, "main", "completed", "Final answer ready.", artifact_path=str(final_artifact.path))
+        update = {"final_answer": result.text, "artifacts": [*state.get("artifacts", []), metadata]}
+        self.artifacts.record_room_io(run_id, "main", final_input, {"final_answer": result.text, "artifact": metadata}, "Final markdown ready.")
         self._checkpoint(run_id, "final_response", {**state, **update})
         return update
 
@@ -323,7 +376,7 @@ class SwarmNodes:
 
 def should_delegate(state: AgentState) -> str:
     decision = state.get("main_decision") or {}
-    return "analyst" if decision.get("delegate", True) else "final"
+    return "supervisor" if decision.get("delegate", True) else "final"
 
 
 def should_retry_review(state: AgentState, max_review_retries: int) -> str:

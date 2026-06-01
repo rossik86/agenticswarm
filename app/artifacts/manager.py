@@ -73,6 +73,7 @@ class ArtifactManager:
                 for agent_name in agent_names
             },
             "artifacts": [],
+            "room_io": {},
             "roles": _roles(agent_names),
             "token_usage": {
                 "total_tokens": 0,
@@ -176,6 +177,23 @@ class ArtifactManager:
         data = self.read_status(run_id)
         artifacts = data.setdefault("artifacts", [])
         artifacts.append(metadata)
+        data["updated_at"] = _timestamp()
+        self._write_status(run_id, data)
+
+    def record_room_io(self, run_id: str, room: str, input_data: Any, output_data: Any, summary: str = "") -> None:
+        data = self.read_status(run_id)
+        room_io = data.setdefault("room_io", {})
+        record = {
+            "room": room,
+            "input": _compact_json(input_data),
+            "output": _compact_json(output_data),
+            "summary": summary,
+            "updated_at": _timestamp(),
+        }
+        previous = room_io.get(room) if isinstance(room_io.get(room), dict) else {}
+        history = list(previous.get("history", [])) if isinstance(previous, dict) and isinstance(previous.get("history"), list) else []
+        history.append(record)
+        room_io[room] = {**record, "history": history}
         data["updated_at"] = _timestamp()
         self._write_status(run_id, data)
 
@@ -331,3 +349,9 @@ def _aggregate_usage(agents: dict[str, Any]) -> dict[str, Any]:
         total_tokens += agent_total
         calls += agent_calls
     return {"total_tokens": total_tokens, "calls": calls, "by_agent": by_agent, "by_role": by_role}
+
+
+def _compact_json(value: Any) -> str:
+    if isinstance(value, str):
+        return value
+    return json.dumps(value, ensure_ascii=True, indent=2)
