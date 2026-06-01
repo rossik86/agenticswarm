@@ -1,0 +1,204 @@
+defaults:
+  provider: agents_sdk
+  model: gpt-4.1
+  temperature: 0.2
+
+codex_cli:
+  command: codex
+  args:
+    - exec
+    - --skip-git-repo-check
+    - --color
+    - never
+    - "-"
+  timeout_seconds: 900
+
+openhands:
+  command: openhands
+  args:
+    - "--help"
+  timeout_seconds: 1800
+
+memory:
+  backend: sqlite
+  path: workspace/memory.sqlite
+  max_context_items: 8
+
+checkpoint:
+  path: workspace/checkpoints.sqlite
+
+observability:
+  backend: local
+  enabled: true
+
+artifact_root: workspace/runs
+max_review_retries: 1
+
+agents:
+  main:
+    type: main
+    description: Main conversational loop. Interprets user intent and returns final CLI answers.
+    skills:
+      - conversation
+      - delegation
+      - synthesis
+    model: gpt-4.1
+    temperature: 0.2
+    prompt: prompts/main.md
+    tools: []
+    delegates_to:
+      - supervisor
+
+  supervisor:
+    type: supervisor
+    description: Breaks user requests into narrow specialist tasks.
+    skills:
+      - planning
+      - routing
+      - task_decomposition
+    model: gpt-4.1
+    temperature: 0.2
+    prompt: prompts/supervisor.md
+    tools:
+      - markdown_writer
+    delegates_to:
+      - analyst_neutral
+      - analyst_positive
+      - analyst_negative
+      - researcher
+      - builder
+      - reviewer
+
+  analyst_neutral:
+    type: specialist
+    description: Neutral analyst. Clarifies intent, asks practical questions, and produces balanced analysis.
+    skills:
+      - analysis
+      - clarification
+      - specification
+    model: gpt-4.1
+    temperature: 0.2
+    prompt: prompts/analyst_neutral.md
+    tools:
+      - markdown_writer
+    output_artifact: analyst_neutral.md
+
+  analyst_positive:
+    type: specialist
+    description: Positive analyst. Finds strengths, opportunities, and approaches likely to work.
+    skills:
+      - opportunity_analysis
+      - constructive_planning
+      - superpower
+    model: gpt-4.1
+    temperature: 0.2
+    prompt: prompts/analyst_positive.md
+    tools:
+      - markdown_writer
+    output_artifact: analyst_positive.md
+
+  analyst_negative:
+    type: specialist
+    description: Negative analyst. Grills assumptions, finds holes, contradictions, and weak reasoning.
+    skills:
+      - grill_me
+      - risk_analysis
+      - adversarial_review
+    model: gpt-4.1
+    temperature: 0.1
+    prompt: prompts/analyst_negative.md
+    tools:
+      - markdown_writer
+    output_artifact: analyst_negative.md
+
+  researcher:
+    type: specialist
+    description: Produces research, analysis, specifications, and decision notes.
+    skills:
+      - research
+      - specification
+      - risk_analysis
+    model: gpt-4.1-mini
+    temperature: 0.2
+    prompt: prompts/researcher.md
+    tools:
+      - markdown_writer
+    output_artifact: researcher.md
+
+  researcher_negative:
+    type: specialist
+    description: Research critic. Challenges whether research is complete, current, and relevant.
+    skills:
+      - research_grilling
+      - source_validation
+      - completeness_check
+    model: gpt-4.1-mini
+    temperature: 0.1
+    prompt: prompts/researcher_negative.md
+    tools:
+      - markdown_writer
+    output_artifact: researcher_negative.md
+
+  builder:
+    type: specialist
+    description: Builds the actual solution for the task. Uses available tools, UI/UX plugins, and implementation discipline.
+    skills:
+      - implementation
+      - tdd_bdd
+      - ux_ui
+      - tool_use
+    model: gpt-4.1
+    temperature: 0.1
+    prompt: prompts/builder.md
+    tools:
+      - markdown_writer
+    output_artifact: builder.md
+
+  reviewer:
+    type: reviewer
+    description: Neutral reviewer. Reviews artifacts and decides whether another pass is needed.
+    skills:
+      - review
+      - validation
+      - quality_control
+    model: gpt-4.1
+    temperature: 0.1
+    prompt: prompts/reviewer.md
+    tools:
+      - markdown_writer
+    output_artifact: review.md
+    validates:
+      - researcher
+      - builder
+
+  reviewer_negative:
+    type: reviewer
+    description: Quality and security guardian. Looks for correctness, safety, security, and maintainability failures.
+    skills:
+      - quality_gate
+      - security_review
+      - adversarial_testing
+    model: gpt-4.1
+    temperature: 0.1
+    prompt: prompts/reviewer_negative.md
+    tools:
+      - markdown_writer
+    output_artifact: review_negative.md
+    validates:
+      - builder
+
+  reviewer_positive:
+    type: reviewer
+    description: Positive quality reviewer. Finds strong parts, language-specific good practices, and durable choices.
+    skills:
+      - quality_superpowers
+      - programming_principles
+      - constructive_review
+    model: gpt-4.1
+    temperature: 0.1
+    prompt: prompts/reviewer_positive.md
+    tools:
+      - markdown_writer
+    output_artifact: review_positive.md
+    validates:
+      - builder

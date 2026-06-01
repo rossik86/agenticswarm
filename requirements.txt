@@ -1,0 +1,6 @@
+openai-agents>=0.2.0
+langgraph>=0.2.0
+langchain-core>=0.3.0
+PyYAML>=6.0.0
+pydantic>=2.7.0
+tzdata>=2025.2; platform_system == "Windows"

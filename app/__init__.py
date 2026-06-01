@@ -1,0 +1,2 @@
+"""Multiagent Swarm application package."""
+
