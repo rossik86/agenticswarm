@@ -22,7 +22,7 @@ class ArtifactManager:
 
     def create_run_id(self) -> str:
         now = datetime.now(ZoneInfo("Europe/Warsaw"))
-        return now.strftime("%Y%m%d-%H%M%S")
+        return now.strftime("%Y%m%d-%H%M%S-%f")
 
     def run_dir(self, run_id: str) -> Path:
         path = self.artifact_root / run_id

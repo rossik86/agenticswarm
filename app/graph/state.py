@@ -6,6 +6,7 @@ from typing import Any, TypedDict
 class AgentState(TypedDict, total=False):
     run_id: str
     user_input: str
+    accepted_async: bool
     memory_context: str
     messages: list[dict[str, Any]]
     main_decision: dict[str, Any] | None

@@ -39,6 +39,12 @@ class SwarmNodes:
 
     async def main_decision(self, state: AgentState) -> AgentState:
         run_id = state["run_id"]
+        if state.get("accepted_async"):
+            decision = state.get("main_decision") or {"delegate": True, "reason": "Accepted asynchronously and delegated to supervisor."}
+            self.artifacts.update_agent(run_id, "main", "completed", str(decision.get("reason", "Delegated.")))
+            update = {"main_decision": decision}
+            self._checkpoint(run_id, "main_async_acceptance", {**state, **update})
+            return update
         self.artifacts.update_agent(run_id, "main", "running", "Deciding whether to delegate.")
         prompt = (
             "Decide whether this user request needs specialist work. "

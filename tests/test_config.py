@@ -21,4 +21,4 @@ def test_artifact_run_id_uses_available_timezone(tmp_path: Path) -> None:
 
     run_id = manager.create_run_id()
 
-    assert len(run_id) == len("20260531-123456")
+    assert len(run_id) == len("20260531-123456-123456")

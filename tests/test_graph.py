@@ -11,7 +11,11 @@ from app.graph.nodes import ANALYST_PANEL, RESEARCH_PANEL, REVIEW_PANEL
 
 
 class FakeRunner:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, str]] = []
+
     async def run(self, agent_name: str, input_text: str) -> AgentRunResult:
+        self.calls.append((agent_name, input_text))
         if agent_name == "main" and "Decide whether" in input_text:
             return AgentRunResult(text='{"delegate": true}', parsed_json={"delegate": True})
         if agent_name == "supervisor":
@@ -74,3 +78,30 @@ def test_council_order_uses_neutral_as_final_arbiter() -> None:
     assert ANALYST_PANEL == ["analyst_positive", "analyst_negative", "analyst_neutral"]
     assert RESEARCH_PANEL == ["researcher_negative", "researcher"]
     assert REVIEW_PANEL == ["reviewer_positive", "reviewer_negative", "reviewer"]
+
+
+def test_async_acceptance_skips_blocking_main_decision(tmp_path: Path) -> None:
+    project_root = Path(__file__).resolve().parents[1]
+    config = load_config(project_root / "configs" / "agents.yaml")
+    config.artifact_root = Path("runs")
+    artifacts = ArtifactManager(tmp_path, config.artifact_root)
+    artifacts.start_run("async-run", "Build a thing", list(config.agents))
+    runner = FakeRunner()
+    graph = build_graph(project_root, config, runner, artifacts)
+    initial_state = {
+        "run_id": "async-run",
+        "user_input": "Build a thing",
+        "accepted_async": True,
+        "main_decision": {"delegate": True, "reason": "Task accepted and delegated to supervisor."},
+        "memory_context": "",
+        "messages": [{"role": "user", "content": "Build a thing"}],
+        "artifacts": [],
+        "specialist_results": [],
+        "errors": [],
+        "review_attempts": 0,
+    }
+
+    result = asyncio.run(graph.ainvoke(initial_state))
+
+    assert result["final_answer"] == "Final answer"
+    assert not any(agent == "main" and "Decide whether" in text for agent, text in runner.calls)

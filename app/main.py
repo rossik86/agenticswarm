@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import asyncio
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from app.agents.factory import build_agent_runner
 from app.artifacts.manager import ArtifactManager
@@ -11,6 +14,12 @@ from app.graph.state import AgentState
 from app.config.schema import ProviderType
 from app.memory.store import MemoryStore
 from app.observability.manager import Observability
+
+
+@dataclass(frozen=True)
+class SubmittedRun:
+    run_id: str
+    message: str
 
 
 class SwarmApp:
@@ -31,6 +40,7 @@ class SwarmApp:
         self.checkpoints = CheckpointStore(project_root, self.config.checkpoint.path)
         self.observability = Observability(project_root, self.config.artifact_root, self.config.observability)
         self.runner = build_agent_runner(project_root, self.config)
+        self._background_tasks: set[asyncio.Task[AgentState]] = set()
         self.graph = build_graph(
             project_root,
             self.config,
@@ -42,6 +52,33 @@ class SwarmApp:
         )
 
     async def run_turn(self, user_input: str) -> AgentState:
+        run_id, initial_state = self._create_run(user_input)
+        return await self._run_graph(run_id, initial_state)
+
+    def submit_turn(self, user_input: str) -> SubmittedRun:
+        run_id, initial_state = self._create_run(
+            user_input,
+            accepted_async=True,
+            main_decision={"delegate": True, "reason": "Task accepted and delegated to supervisor."},
+        )
+        self.artifacts.update_agent(run_id, "main", "completed", "Task accepted and delegated to supervisor.")
+        self.artifacts.update_agent(run_id, "supervisor", "running", "Task queued for supervised execution.")
+        self.observability.emit(run_id, "run.accepted", {"user_input": user_input})
+        task = asyncio.create_task(self._run_graph(run_id, initial_state))
+        self._background_tasks.add(task)
+        task.add_done_callback(self._background_tasks.discard)
+        return SubmittedRun(run_id=run_id, message="Zadanie przyjęte i przekazane do supervisora.")
+
+    async def wait_for_background(self) -> None:
+        if self._background_tasks:
+            await asyncio.gather(*self._background_tasks, return_exceptions=True)
+
+    def _create_run(
+        self,
+        user_input: str,
+        accepted_async: bool = False,
+        main_decision: dict[str, Any] | None = None,
+    ) -> tuple[str, AgentState]:
         run_id = self.artifacts.create_run_id()
         self.artifacts.start_run(run_id, user_input, list(self.config.agents), self._agent_metadata())
         self.observability.emit(run_id, "run.started", {"user_input": user_input})
@@ -49,13 +86,18 @@ class SwarmApp:
         initial_state: AgentState = {
             "run_id": run_id,
             "user_input": user_input,
+            "accepted_async": accepted_async,
             "memory_context": memory_context,
+            "main_decision": main_decision,
             "messages": [{"role": "user", "content": user_input}],
             "artifacts": [],
             "specialist_results": [],
             "errors": [],
             "review_attempts": 0,
         }
+        return run_id, initial_state
+
+    async def _run_graph(self, run_id: str, initial_state: AgentState) -> AgentState:
         try:
             result = await self.graph.ainvoke(initial_state)
         except Exception as exc:
@@ -67,6 +109,14 @@ class SwarmApp:
         if self.memory and result.get("final_answer"):
             self.memory.remember(run_id, "main", str(result["final_answer"]))
         self.observability.emit(run_id, "run.completed", {"final_answer": result.get("final_answer")})
+        self.observability.emit(
+            run_id,
+            "main.notified",
+            {
+                "message": "Supervisor workflow completed and final answer is ready.",
+                "artifact_count": len(result.get("artifacts", [])),
+            },
+        )
         return result
 
     def _agent_metadata(self) -> dict[str, dict[str, object]]:

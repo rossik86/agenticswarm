@@ -55,30 +55,27 @@ async def async_main(argv: list[str] | None = None) -> int:
     print("Multiagent Swarm CLI. Type 'exit' to quit.")
     while True:
         try:
-            user_input = input("\nYou> ").strip()
+            user_input = (await asyncio.to_thread(input, "\nYou> ")).strip()
         except EOFError:
+            await app.wait_for_background()
             print()
             return 0
 
         if user_input.lower() in {"exit", "quit"}:
+            await app.wait_for_background()
             return 0
         if not user_input:
             continue
 
         try:
-            result = await app.run_turn(user_input)
+            submitted = app.submit_turn(user_input)
         except Exception as exc:
             print(f"\nError: {exc}")
             continue
 
         print("\nSwarm>")
-        print(result.get("final_answer") or "No final answer returned.")
-
-        artifacts = result.get("artifacts", [])
-        if artifacts:
-            print("\nArtifacts:")
-            for artifact in artifacts:
-                print(f"- {artifact.get('agent')}: {artifact.get('artifact_path')}")
+        print(f"{submitted.message} Run: {submitted.run_id}")
+        print("Możesz wpisać następny prompt; wynik pojawi się w dashboardzie i artefaktach runu.")
 
 
 def main() -> None:
