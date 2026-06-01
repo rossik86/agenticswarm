@@ -203,7 +203,8 @@ button {
   z-index: 7 !important;
 }
 
-.flow-overlay .react-flow__node-default {
+.flow-overlay .react-flow__node-default,
+.flow-overlay .react-flow__node-flowRoom {
   width: auto;
   padding: 0;
   border: 0;
@@ -225,6 +226,13 @@ button {
   margin-top: 2px;
   color: #66768a;
   font-size: 10px;
+}
+
+.flow-handle {
+  width: 9px;
+  height: 9px;
+  border: 2px solid #f8fafc;
+  background: #7d8796;
 }
 
 .flow-rf-node.room {

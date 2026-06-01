@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { MarkerType, ReactFlow } from "@xyflow/react";
+import { Handle, MarkerType, Position, ReactFlow } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import {
   Activity,
@@ -32,6 +32,8 @@ const ROOM_AGENT_SLOTS = [
   { left: "49%", top: "62%" },
   { left: "68%", top: "50%" }
 ];
+
+const FLOW_NODE_TYPES = { flowRoom: FlowRoomNode };
 
 function App() {
   const [status, setStatus] = useState(null);
@@ -200,8 +202,9 @@ function RunFlowOverlay({ flow }) {
       </div>
       <ReactFlow
         key={flow.key}
-        defaultNodes={flow.nodes}
-        defaultEdges={flow.edges}
+        nodes={flow.nodes}
+        edges={flow.edges}
+        nodeTypes={FLOW_NODE_TYPES}
         fitView={false}
         nodesDraggable={false}
         nodesConnectable={false}
@@ -218,11 +221,13 @@ function RunFlowOverlay({ flow }) {
   );
 }
 
-function FlowNodeLabel({ label, subLabel, kind, status }) {
+function FlowRoomNode({ data }) {
   return (
-    <div className={`flow-rf-node ${kind || ""} ${status || ""}`}>
-      <strong>{label}</strong>
-      {subLabel ? <span>{subLabel}</span> : null}
+    <div className={`flow-rf-node ${data.kind || ""} ${data.status || ""}`}>
+      <Handle id="in" type="target" position={Position.Left} className="flow-handle" />
+      <strong>{data.label}</strong>
+      {data.subLabel ? <span>{data.subLabel}</span> : null}
+      <Handle id="out" type="source" position={Position.Right} className="flow-handle" />
     </div>
   );
 }
@@ -676,10 +681,13 @@ function buildRunFlow(events, agents, mode = "desktop", size = { width: 1000, he
     const kind = role === "start" || role === "end" ? role : "room";
     return {
       id: role,
-      type: "default",
+      type: "flowRoom",
       position: toReactFlowPosition(point, size),
       data: {
-        label: <FlowNodeLabel label={label} subLabel={subLabel} kind={kind} status={status} />
+        label,
+        subLabel,
+        kind,
+        status
       },
       draggable: false,
       selectable: false
@@ -690,6 +698,8 @@ function buildRunFlow(events, agents, mode = "desktop", size = { width: 1000, he
     id: `${transition.source}-${transition.target}-${transition.index}`,
     source: transition.source,
     target: transition.target,
+    sourceHandle: "out",
+    targetHandle: "in",
     label: transitionLabel(transition),
     type: "smoothstep",
     animated: normalizeFlowStatus(transition.status) === "running",
