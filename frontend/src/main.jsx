@@ -177,22 +177,25 @@ function OfficeMap({ rooms, onSelect, selected, events, agents }) {
     observer.observe(officeRef.current);
     return () => observer.disconnect();
   }, []);
-  const flow = useMemo(() => buildRunFlow(events, agents, flowMode, officeSize), [events, agents, flowMode, officeSize]);
+  const flow = useMemo(
+    () => buildRunFlow(events, rooms, flowMode, officeSize, selected, onSelect),
+    [events, rooms, flowMode, officeSize, selected, onSelect]
+  );
   return (
     <section className="office" aria-label="Agent town office" ref={officeRef}>
       <div className="corridor horizontal" />
       <div className="corridor vertical" />
       <div className="corridor diagonal-a" />
       <div className="corridor diagonal-b" />
-      <RunFlowOverlay flow={flow} />
-      {rooms.map((room) => (
+      <RunFlowOverlay flow={flow} onSelect={onSelect} selected={selected} />
+      <div className="legacy-rooms" aria-hidden="true">{rooms.map((room) => (
         <Room key={room.role} room={room} onSelect={onSelect} selected={selected} />
-      ))}
+      ))}</div>
     </section>
   );
 }
 
-function RunFlowOverlay({ flow }) {
+function RunFlowOverlay({ flow, onSelect, selected }) {
   return (
     <div className="flow-overlay" aria-label="Run flow overlay" data-edge-count={flow.edges.length}>
       <div className="flow-map-legend">
@@ -216,17 +219,36 @@ function RunFlowOverlay({ flow }) {
         preventScrolling={false}
         onlyRenderVisibleElements={false}
         proOptions={{ hideAttribution: true }}
+        onNodeClick={(_, node) => {
+          if (node.id !== "start" && node.id !== "end") onSelect({ type: "room", id: node.id });
+        }}
       />
     </div>
   );
 }
 
 function FlowRoomNode({ data }) {
+  const image = data.kind === "command" ? commandRoom : roomTile;
   return (
     <div className={`flow-rf-node ${data.kind || ""} ${data.status || ""}`}>
       <Handle id="in" type="target" position={Position.Left} className="flow-handle" />
-      <strong>{data.label}</strong>
-      {data.subLabel ? <span>{data.subLabel}</span> : null}
+      {data.kind === "start" || data.kind === "end" ? (
+        <div className="flow-terminal">
+          <strong>{data.label}</strong>
+          {data.subLabel ? <span>{data.subLabel}</span> : null}
+        </div>
+      ) : (
+        <div className={`flow-room-card ${data.selected ? "selected" : ""}`}>
+          <span className="room-light" />
+          <img src={image} alt="" className="room-art" />
+          <span className="room-name">{data.label}</span>
+          <span className="room-count">{data.agentCount}</span>
+          {(data.agents || []).map((agent, index) => (
+            <AgentSprite key={agent.name} agent={agent} slot={ROOM_AGENT_SLOTS[index % ROOM_AGENT_SLOTS.length]} onSelect={data.onSelect} />
+          ))}
+          {data.failedAgent ? <ErrorBubble agent={data.failedAgent} /> : data.active ? <SpeechBubble agents={data.agents} /> : null}
+        </div>
+      )}
       <Handle id="out" type="source" position={Position.Right} className="flow-handle" />
     </div>
   );
@@ -639,13 +661,13 @@ function compactOption(value) {
   return text.length > 42 ? `${text.slice(0, 42)}...` : text;
 }
 
-function buildRunFlow(events, agents, mode = "desktop", size = { width: 1000, height: 850 }) {
+function buildRunFlow(events, rooms, mode = "desktop", size = { width: 1000, height: 850 }, selected, onSelect) {
   const eventStatuses = {};
   for (const event of events || []) {
     const role = roleFromEvent(event);
     if (role) eventStatuses[role] = flowStatusFromEvent(event);
   }
-  const agentStatuses = Object.values(agents || {}).reduce((acc, agent) => {
+  const agentStatuses = (rooms || []).flatMap((room) => room.agents || []).reduce((acc, agent) => {
     if (!agent?.role) return acc;
     acc[agent.role] = combineFlowStatus(acc[agent.role], normalizeFlowStatus(agent.status));
     return acc;
@@ -674,20 +696,28 @@ function buildRunFlow(events, agents, mode = "desktop", size = { width: 1000, he
   });
   const nodes = ["start", ...ROOMS.map((room) => room.role), "end"].map((role) => {
     const point = flowPoint(role, mode);
-    const room = ROOMS.find((item) => item.role === role);
+    const room = (rooms || []).find((item) => item.role === role) || ROOMS.find((item) => item.role === role);
     const status = role === "start" ? "running" : role === "end" ? normalizeFlowStatus(agentStatuses[lastRole] || "completed") : agentStatuses[role] || "idle";
     const label = role === "start" ? "START" : role === "end" ? "END" : room?.label || role;
     const subLabel = role === "start" ? firstRole : role === "end" ? lastRole : status;
-    const kind = role === "start" || role === "end" ? role : "room";
+    const kind = role === "start" || role === "end" ? role : room?.kind || "room";
+    const roomAgents = room?.agents || [];
+    const failedAgent = roomAgents.find((agent) => agent.status === "failed");
     return {
       id: role,
       type: "flowRoom",
-      position: toReactFlowPosition(point, size),
+      position: toReactFlowPosition(point, size, role),
       data: {
         label,
         subLabel,
         kind,
-        status
+        status,
+        agents: roomAgents,
+        agentCount: roomAgents.length,
+        active: roomAgents.some((agent) => agent.status === "running"),
+        failedAgent,
+        selected: selected?.type === "room" && selected.id === role,
+        onSelect
       },
       draggable: false,
       selectable: false
@@ -698,8 +728,6 @@ function buildRunFlow(events, agents, mode = "desktop", size = { width: 1000, he
     id: `${transition.source}-${transition.target}-${transition.index}`,
     source: transition.source,
     target: transition.target,
-    sourceHandle: "out",
-    targetHandle: "in",
     label: transitionLabel(transition),
     type: "smoothstep",
     animated: normalizeFlowStatus(transition.status) === "running",
@@ -722,10 +750,11 @@ function buildRunFlow(events, agents, mode = "desktop", size = { width: 1000, he
   };
 }
 
-function toReactFlowPosition(point, size) {
+function toReactFlowPosition(point, size, role) {
+  const isTerminal = role === "start" || role === "end";
   return {
-    x: (point.x / 100) * size.width - 58,
-    y: (point.y / 100) * size.height - 24
+    x: (point.x / 100) * size.width - (isTerminal ? 58 : 119),
+    y: (point.y / 100) * size.height - (isTerminal ? 24 : 98)
   };
 }
 

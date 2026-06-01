@@ -140,6 +140,7 @@ button {
 
 .flow-overlay .react-flow__node {
   visibility: visible !important;
+  pointer-events: auto;
 }
 
 .flow-map-legend {
@@ -185,18 +186,20 @@ button {
 }
 
 .flow-rf-node {
-  width: 116px;
-  min-height: 48px;
-  display: grid;
-  place-items: center;
-  align-content: center;
-  padding: 6px 8px;
-  border: 2px solid #111923;
-  border-radius: 8px;
-  background: rgba(248, 250, 252, 0.95);
+  position: relative;
+  width: 238px;
+  height: 196px;
+  padding: 0;
+  border: 0;
+  background: transparent;
   color: #111923;
   text-align: center;
-  box-shadow: 0 8px 18px rgba(30, 42, 56, 0.18);
+}
+
+.flow-rf-node.start,
+.flow-rf-node.end {
+  width: 116px;
+  height: 48px;
 }
 
 .react-flow__node {
@@ -226,6 +229,59 @@ button {
   margin-top: 2px;
   color: #66768a;
   font-size: 10px;
+}
+
+.flow-terminal {
+  width: 116px;
+  min-height: 48px;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  padding: 6px 8px;
+  border: 2px solid #111923;
+  border-radius: 8px;
+  background: rgba(248, 250, 252, 0.95);
+  box-shadow: 0 8px 18px rgba(30, 42, 56, 0.18);
+}
+
+.flow-room-card {
+  position: relative;
+  width: 238px;
+  height: 196px;
+  text-align: left;
+}
+
+.flow-room-card::after {
+  content: "";
+  position: absolute;
+  inset: 15px 8px 18px;
+  border-radius: 8px;
+  background: rgba(20, 27, 36, 0.42);
+  filter: blur(18px);
+  z-index: 0;
+}
+
+.flow-room-card.selected .room-art {
+  outline: 3px solid #22a6b3;
+  outline-offset: 2px;
+}
+
+.flow-rf-node.running .room-art {
+  filter: saturate(1.05) brightness(1.05);
+}
+
+.flow-rf-node.failed .room-art {
+  filter: saturate(1.15) brightness(0.88) sepia(0.15);
+}
+
+.flow-rf-node.failed .room-light {
+  background: rgba(226, 65, 56, 0.32);
+  box-shadow: 0 0 30px 16px rgba(226, 65, 56, 0.28);
+}
+
+.flow-rf-node.running .room-light {
+  background: rgba(255, 205, 104, 0.55);
+  box-shadow: 0 0 34px 18px rgba(255, 196, 83, 0.36);
 }
 
 .flow-handle {
@@ -258,6 +314,10 @@ button {
 .flow-rf-node.failed,
 .flow-rf-node.end.failed {
   border-color: #c8322b;
+}
+
+.flow-rf-node.end.failed .flow-terminal {
+  border-color: #c8322b;
   background: rgba(255, 240, 239, 0.95);
 }
 
@@ -276,6 +336,10 @@ button {
 
 .flow-rf-edge.failed .react-flow__edge-path {
   stroke-dasharray: 0;
+}
+
+.legacy-rooms {
+  display: none;
 }
 
 .corridor {
