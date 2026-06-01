@@ -55,11 +55,14 @@ function App() {
 
   async function refresh() {
     const runQuery = selectedRunId ? `?run_id=${encodeURIComponent(selectedRunId)}` : "";
-    const [statusResult, runsResult, eventsResult, checkpointsResult] = await Promise.all([
+    const [statusResult, runsResult] = await Promise.all([
       fetch(`/status.json${runQuery}`, { cache: "no-store" }).then((response) => response.json()),
-      fetch("/runs.json", { cache: "no-store" }).then((response) => response.json()),
-      fetch(`/events.json${runQuery}`, { cache: "no-store" }).then((response) => response.json()),
-      fetch(`/checkpoints.json${runQuery}`, { cache: "no-store" }).then((response) => response.json())
+      fetch("/runs.json", { cache: "no-store" }).then((response) => response.json())
+    ]);
+    const effectiveRunQuery = statusResult.run_id ? `?run_id=${encodeURIComponent(statusResult.run_id)}` : runQuery;
+    const [eventsResult, checkpointsResult] = await Promise.all([
+      fetch(`/events.json${effectiveRunQuery}`, { cache: "no-store" }).then((response) => response.json()),
+      fetch(`/checkpoints.json${effectiveRunQuery}`, { cache: "no-store" }).then((response) => response.json())
     ]);
     setStatus(statusResult);
     setRuns(runsResult.runs || []);

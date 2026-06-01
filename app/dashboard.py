@@ -69,15 +69,17 @@ def serve_dashboard(project_root: Path, config_path: Path, host: str = "127.0.0.
                 return
             if parsed.path == "/events.json":
                 params = parse_qs(parsed.query)
-                self._send_json({"events": read_recent_events(events_path, limit=300, run_id=params.get("run_id", [None])[0])})
+                run_id = params.get("run_id", [None])[0] or latest_run_id(artifact_root)
+                self._send_json({"events": read_recent_events(events_path, limit=300, run_id=run_id)})
                 return
             if parsed.path == "/checkpoints.json":
                 params = parse_qs(parsed.query)
+                run_id = params.get("run_id", [None])[0] or latest_run_id(artifact_root)
                 self._send_json(
                     {
                         "checkpoints": read_checkpoints(
                             checkpoint_path,
-                            run_id=params.get("run_id", [None])[0],
+                            run_id=run_id,
                         )
                     }
                 )
@@ -249,6 +251,12 @@ def read_status(artifact_root: Path, run_id: str | None) -> dict[str, object]:
             "path": str(run_dir),
         }
     return {"run_id": run_id, "status": "not_found", "message": "Run not found.", "agents": {}, "artifacts": [], "errors": []}
+
+
+def latest_run_id(artifact_root: Path) -> str | None:
+    status = read_latest_status(artifact_root)
+    run_id = status.get("run_id") if isinstance(status, dict) else None
+    return str(run_id) if run_id else None
 
 
 def read_runs(artifact_root: Path, limit: int = 80) -> list[dict[str, object]]:
