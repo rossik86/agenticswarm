@@ -13,6 +13,8 @@ import threading
 from urllib.parse import parse_qs, quote, urlparse
 from zoneinfo import ZoneInfo
 
+import yaml
+
 from app.agents.runner import load_skill_markdowns
 from app.config.loader import load_config
 
@@ -89,6 +91,16 @@ def serve_dashboard(project_root: Path, config_path: Path, host: str = "127.0.0.
 
         def do_POST(self) -> None:
             parsed = urlparse(self.path)
+            if parsed.path == "/agent-settings.json":
+                payload = self._read_json_body()
+                result = update_agent_runtime_settings(config_path, payload)
+                if result.get("updated"):
+                    nonlocal config
+                    config = load_config(config_path)
+                    agent_name = str(payload.get("agent") or "")
+                    result["agent"] = read_agent_settings(project_root, config, agent_name)
+                self._send_json(result)
+                return
             if parsed.path in {"/checkpoint/resume", "/checkpoint/restart"}:
                 payload = self._read_json_body()
                 action = parsed.path.rsplit("/", 1)[-1]
@@ -281,21 +293,78 @@ def read_agent_settings(project_root: Path, config: object, agent_name: str) -> 
         root = project_root.resolve()
         if (root in path.parents or path == root) and path.exists() and path.is_file():
             prompt_text = path.read_text(encoding="utf-8")
+    provider = getattr(agent, "provider", None)
+    defaults = getattr(config, "defaults", None)
+    effective_provider = provider or getattr(defaults, "provider", None)
+    effective_model = getattr(agent, "model", None) or getattr(defaults, "model", None)
     return {
         "name": agent_name,
         "display_name": getattr(agent, "display_name", None) or agent_name.replace("_", " ").title(),
         "description": getattr(agent, "description", ""),
         "type": getattr(agent, "type", ""),
+        "provider": provider,
+        "effective_provider": effective_provider,
         "skills": getattr(agent, "skills", []),
         "skill_markdowns": load_skill_markdowns(project_root, getattr(agent, "skills", [])),
         "tools": getattr(agent, "tools", []),
         "delegates_to": getattr(agent, "delegates_to", []),
         "validates": getattr(agent, "validates", []),
         "model": getattr(agent, "model", None),
+        "effective_model": effective_model,
+        "model_options": model_options_for_provider(str(effective_provider or "")),
         "temperature": getattr(agent, "temperature", None),
         "prompt_path": str(prompt_path) if prompt_path else "",
         "prompt": prompt_text,
     }
+
+
+def update_agent_runtime_settings(config_path: Path, payload: dict[str, object]) -> dict[str, object]:
+    agent_name = str(payload.get("agent") or "").strip()
+    if not agent_name:
+        return {"updated": False, "message": "Brak nazwy agenta."}
+    raw = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+    agents = raw.get("agents")
+    if not isinstance(agents, dict) or agent_name not in agents:
+        return {"updated": False, "message": "Nie znaleziono agenta."}
+    agent = agents[agent_name]
+    if not isinstance(agent, dict):
+        return {"updated": False, "message": "Niepoprawna konfiguracja agenta."}
+
+    provider_value = payload.get("provider")
+    if provider_value in {"", None, "default"}:
+        agent.pop("provider", None)
+    elif provider_value in {"agents_sdk", "codex_cli", "openhands"}:
+        agent["provider"] = str(provider_value)
+    else:
+        return {"updated": False, "message": "Nieobsługiwany provider."}
+
+    model_value = str(payload.get("model") or "").strip()
+    if model_value:
+        agent["model"] = model_value
+    else:
+        agent.pop("model", None)
+
+    temperature_value = payload.get("temperature")
+    if temperature_value in {"", None}:
+        agent.pop("temperature", None)
+    else:
+        try:
+            agent["temperature"] = float(temperature_value)
+        except (TypeError, ValueError):
+            return {"updated": False, "message": "Temperature musi być liczbą."}
+
+    config_path.write_text(yaml.safe_dump(raw, sort_keys=False, allow_unicode=False), encoding="utf-8")
+    load_config(config_path)
+    return {"updated": True, "message": "Ustawienia agenta zapisane."}
+
+
+def model_options_for_provider(provider: str) -> list[str]:
+    options: dict[str, list[str]] = {
+        "agents_sdk": ["gpt-4.1", "gpt-4.1-mini", "o4-mini", "o3"],
+        "codex_cli": ["gpt-5", "gpt-5-codex", "gpt-4.1", "o4-mini"],
+        "openhands": ["gpt-4.1", "gpt-4.1-mini", "claude-sonnet-4", "local"],
+    }
+    return options.get(provider, [])
 
 
 def _path_timestamp(path: Path) -> str:

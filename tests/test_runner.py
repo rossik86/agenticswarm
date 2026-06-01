@@ -4,7 +4,7 @@ import asyncio
 import sys
 from pathlib import Path
 
-from app.agents.runner import AgentRunner, _codex_usage, _compose_instructions, load_skill_markdowns
+from app.agents.runner import AgentRunner, _codex_args_with_model, _codex_usage, _compose_instructions, load_skill_markdowns
 from app.config.loader import load_config
 
 
@@ -44,6 +44,18 @@ def test_openhands_provider_uses_configured_subprocess() -> None:
 
 def test_codex_usage_parser_handles_grouped_numbers() -> None:
     assert _codex_usage("tokens used\n10\u00a0248") == {"total_tokens": 10248, "source": "codex_cli"}
+
+
+def test_codex_cli_args_include_agent_model() -> None:
+    assert _codex_args_with_model("codex", ["exec", "--skip-git-repo-check", "-"], "gpt-5-codex") == [
+        "exec",
+        "--model",
+        "gpt-5-codex",
+        "--skip-git-repo-check",
+        "-",
+    ]
+    assert _codex_args_with_model("codex", ["exec", "--model", "o3", "-"], "gpt-5-codex") == ["exec", "--model", "o3", "-"]
+    assert _codex_args_with_model(sys.executable, ["-c", "print('ok')"], "gpt-5-codex") == ["-c", "print('ok')"]
 
 
 def test_agent_instructions_include_markdown_skill_files() -> None:

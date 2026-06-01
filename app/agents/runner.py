@@ -86,7 +86,7 @@ class AgentRunner:
         )
 
         command = _resolve_command(cli_config.command)
-        args = [command, *cli_config.args]
+        args = [command, *_codex_args_with_model(command, cli_config.args, agent_config.model)]
         process = await asyncio.create_subprocess_exec(
             *args,
             cwd=str(self.project_root),
@@ -252,3 +252,14 @@ def _compose_instructions(project_root: Path, agent_config: AgentConfig, prompt:
 def _resolve_command(command: str) -> str:
     resolved = shutil.which(command)
     return resolved or command
+
+
+def _codex_args_with_model(command: str, args: list[str], model: str | None) -> list[str]:
+    if not model or Path(command).stem.lower() != "codex":
+        return list(args)
+    if "-m" in args or "--model" in args:
+        return list(args)
+    next_args = list(args)
+    insert_at = 1 if next_args and next_args[0] == "exec" else 0
+    next_args[insert_at:insert_at] = ["--model", model]
+    return next_args

@@ -34,6 +34,11 @@ const ROOM_AGENT_SLOTS = [
 ];
 
 const FLOW_NODE_TYPES = { flowRoom: FlowRoomNode };
+const MODEL_OPTIONS = {
+  agents_sdk: ["gpt-4.1", "gpt-4.1-mini", "o4-mini", "o3"],
+  codex_cli: ["gpt-5", "gpt-5-codex", "gpt-4.1", "o4-mini"],
+  openhands: ["gpt-4.1", "gpt-4.1-mini", "claude-sonnet-4", "local"]
+};
 
 function App() {
   const [status, setStatus] = useState(null);
@@ -143,7 +148,23 @@ function App() {
         </button>
       ) : null}
       {modal ? <TextModal modal={modal} onClose={() => setModal(null)} /> : null}
-      {agentSettings ? <AgentSettingsModal settings={agentSettings} onClose={() => setAgentSettings(null)} /> : null}
+      {agentSettings ? (
+        <AgentSettingsModal
+          settings={agentSettings}
+          onClose={() => setAgentSettings(null)}
+          onSave={async (nextSettings) => {
+            setNotice(`Zapisuję model dla: ${nextSettings.name}`);
+            const response = await fetch("/agent-settings.json", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(nextSettings)
+            }).then((item) => item.json());
+            setNotice(response.message || "Ustawienia zapisane.");
+            if (response.agent) setAgentSettings(response.agent);
+            await refresh();
+          }}
+        />
+      ) : null}
     </main>
   );
 }
@@ -615,13 +636,19 @@ function TextModal({ modal, onClose }) {
   );
 }
 
-function AgentSettingsModal({ settings, onClose }) {
+function AgentSettingsModal({ settings, onClose, onSave }) {
+  const [provider, setProvider] = useState(settings.provider || "default");
+  const [model, setModel] = useState(settings.model || settings.effective_model || "");
+  const [temperature, setTemperature] = useState(settings.temperature ?? "");
+  const [saving, setSaving] = useState(false);
+  const selectedProvider = provider === "default" ? settings.effective_provider : provider;
+  const modelOptions = MODEL_OPTIONS[selectedProvider] || settings.model_options || [];
   const rows = [
     ["Agent", settings.name],
     ["Nazwa", settings.display_name],
     ["Typ", settings.type],
-    ["Model", settings.model || "-"],
-    ["Temperature", settings.temperature ?? "-"],
+    ["Provider active", settings.effective_provider || "-"],
+    ["Model active", settings.effective_model || "-"],
     ["Prompt", settings.prompt_path || "-"]
   ];
   return (
@@ -645,6 +672,51 @@ function AgentSettingsModal({ settings, onClose }) {
                 <strong>{String(value || "-")}</strong>
               </div>
             ))}
+            <form
+              className="runtime-form"
+              onSubmit={async (event) => {
+                event.preventDefault();
+                setSaving(true);
+                try {
+                  await onSave({ agent: settings.name, provider, model, temperature });
+                } finally {
+                  setSaving(false);
+                }
+              }}
+            >
+              <label>
+                <span>Provider</span>
+                <select value={provider} onChange={(event) => setProvider(event.target.value)}>
+                  <option value="default">default ({settings.effective_provider || "agents_sdk"})</option>
+                  <option value="agents_sdk">agents_sdk</option>
+                  <option value="codex_cli">codex_cli</option>
+                  <option value="openhands">openhands</option>
+                </select>
+              </label>
+              <label>
+                <span>Model</span>
+                <input list={`model-options-${settings.name}`} value={model} onChange={(event) => setModel(event.target.value)} />
+                <datalist id={`model-options-${settings.name}`}>
+                  {modelOptions.map((option) => (
+                    <option value={option} key={option} />
+                  ))}
+                </datalist>
+              </label>
+              <label>
+                <span>Temperature</span>
+                <input
+                  type="number"
+                  min="0"
+                  max="2"
+                  step="0.1"
+                  value={temperature}
+                  onChange={(event) => setTemperature(event.target.value)}
+                />
+              </label>
+              <button type="submit" disabled={saving}>
+                {saving ? "Zapisuję..." : "Zapisz runtime"}
+              </button>
+            </form>
           </section>
           <section>
             <h3>Skill labels</h3>

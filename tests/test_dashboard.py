@@ -16,6 +16,7 @@ from app.dashboard import (
     read_agent_settings,
     render_dashboard,
     render_town,
+    update_agent_runtime_settings,
 )
 from app.config.loader import load_config
 
@@ -127,7 +128,26 @@ def test_dashboard_reads_agent_settings_from_config() -> None:
     settings = read_agent_settings(project_root, config, "analyst_neutral")
 
     assert settings["display_name"] == "Neutral Analyst Arbiter"
+    assert settings["effective_provider"] == "agents_sdk"
+    assert settings["effective_model"] == "gpt-4.1"
     assert "analysis" in settings["skills"]
     assert settings["skill_markdowns"][0]["path"] == "skills\\analysis.md" or settings["skill_markdowns"][0]["path"] == "skills/analysis.md"
     assert "balanced analysis" in settings["skill_markdowns"][0]["content"]
     assert "You are the neutral analyst" in settings["prompt"]
+
+
+def test_dashboard_updates_agent_runtime_settings(tmp_path: Path) -> None:
+    project_root = Path(__file__).resolve().parents[1]
+    config_path = tmp_path / "agents.yaml"
+    config_path.write_text((project_root / "configs" / "agents.yaml").read_text(encoding="utf-8"), encoding="utf-8")
+
+    result = update_agent_runtime_settings(
+        config_path,
+        {"agent": "builder", "provider": "codex_cli", "model": "gpt-5-codex", "temperature": "0.3"},
+    )
+    config = load_config(config_path)
+
+    assert result["updated"] is True
+    assert config.agents["builder"].provider == "codex_cli"
+    assert config.agents["builder"].model == "gpt-5-codex"
+    assert config.agents["builder"].temperature == 0.3
