@@ -45,6 +45,7 @@ function App() {
   const [autoSelectedFailure, setAutoSelectedFailure] = useState(false);
   const [pendingCheckpoint, setPendingCheckpoint] = useState(null);
   const [modal, setModal] = useState(null);
+  const [agentSettings, setAgentSettings] = useState(null);
   const [notice, setNotice] = useState("");
 
   async function refresh() {
@@ -125,6 +126,14 @@ function App() {
             }
           }}
           pendingCheckpoint={pendingCheckpoint}
+          onOpenAgentSettings={async (agent) => {
+            setNotice(`Pobieram ustawienia: ${displayAgentName(agent)}`);
+            const settings = await fetch(`/agent-settings.json?agent=${encodeURIComponent(agent.name)}`, { cache: "no-store" }).then((item) =>
+              item.json()
+            );
+            setAgentSettings(settings.agent);
+            setNotice("");
+          }}
         />
       </section>
 
@@ -134,6 +143,7 @@ function App() {
         </button>
       ) : null}
       {modal ? <TextModal modal={modal} onClose={() => setModal(null)} /> : null}
+      {agentSettings ? <AgentSettingsModal settings={agentSettings} onClose={() => setAgentSettings(null)} /> : null}
     </main>
   );
 }
@@ -293,7 +303,7 @@ function AgentSprite({ agent, slot, onSelect }) {
       style={slot}
       role="button"
       tabIndex={0}
-      title={agent.name}
+      title={displayAgentName(agent)}
       onClick={(event) => {
         event.stopPropagation();
         onSelect({ type: "agent", id: agent.name });
@@ -307,7 +317,7 @@ function AgentSprite({ agent, slot, onSelect }) {
     >
       <img src={robotSprite} alt="" />
       {agent.status === "failed" ? <span className="agent-error-mark">!</span> : null}
-      <small>{shortName(agent.name)}</small>
+      <small>{shortName(displayAgentName(agent))}</small>
     </span>
   );
 }
@@ -317,7 +327,7 @@ function ErrorBubble({ agent }) {
   return (
     <span className="speech error-speech">
       <AlertTriangle size={13} />
-      <strong>{agent.name}</strong>
+      <strong>{displayAgentName(agent)}</strong>
       <span>{text.slice(0, 82)}</span>
     </span>
   );
@@ -337,16 +347,22 @@ function Inspector({
   selectedRoom,
   onCheckpointAction,
   pendingCheckpoint,
-  onOpenText
+  onOpenText,
+  onOpenAgentSettings
 }) {
   if (selectedAgent) {
     const agentEvents = events.filter((event) => String(event.event || "").includes(selectedAgent.name));
     const agentCheckpoints = checkpoints.filter((checkpoint) => belongsToRoom(checkpoint, selectedAgent.role));
     return (
       <aside className="inspector">
-        <PanelTitle icon={<TerminalSquare size={17} />} title={selectedAgent.name} subtitle={selectedAgent.role} />
+        <PanelTitle
+          icon={<TerminalSquare size={17} />}
+          title={displayAgentName(selectedAgent)}
+          subtitle={`${selectedAgent.name} · ${selectedAgent.role}`}
+        />
         <KeyValue label="Status" value={selectedAgent.status} />
         <KeyValue label="Stance" value={selectedAgent.stance || "neutral"} />
+        <AgentOptions agent={selectedAgent} onOpenAgentSettings={onOpenAgentSettings} />
         {selectedAgent.status === "failed" ? <ErrorCallout error={selectedAgent.error || selectedAgent.summary} /> : null}
         <CompactField label="Summary" value={selectedAgent.summary || selectedAgent.error || "-"} onOpen={onOpenText} />
         <ArtifactLink path={selectedAgent.artifact_path} />
@@ -371,6 +387,17 @@ function Inspector({
       <CheckpointList checkpoints={roomCheckpoints} onAction={onCheckpointAction} pendingCheckpoint={pendingCheckpoint} />
       <Timeline events={roomEvents.length ? roomEvents : events.slice(-8)} />
     </aside>
+  );
+}
+
+function AgentOptions({ agent, onOpenAgentSettings }) {
+  return (
+    <section className="agent-options">
+      <button type="button" onClick={() => onOpenAgentSettings(agent)}>
+        Ustawienia agenta
+      </button>
+      <span>{displayAgentName(agent)}</span>
+    </section>
   );
 }
 
@@ -401,9 +428,9 @@ function CouncilList({ room }) {
       <h2>Rada</h2>
       <div className="agent-list">
         {(room?.agents || []).map((agent) => (
-          <div className="agent-row" key={agent.name}>
-            <span className={`dot ${agent.status || "unknown"}`} />
-            <span>{agent.name}</span>
+            <div className="agent-row" key={agent.name}>
+              <span className={`dot ${agent.status || "unknown"}`} />
+            <span>{displayAgentName(agent)}</span>
             <small>{agent.stance || "neutral"}</small>
           </div>
         ))}
@@ -588,6 +615,67 @@ function TextModal({ modal, onClose }) {
   );
 }
 
+function AgentSettingsModal({ settings, onClose }) {
+  const rows = [
+    ["Agent", settings.name],
+    ["Nazwa", settings.display_name],
+    ["Typ", settings.type],
+    ["Model", settings.model || "-"],
+    ["Temperature", settings.temperature ?? "-"],
+    ["Prompt", settings.prompt_path || "-"]
+  ];
+  return (
+    <div className="modal-backdrop" role="presentation" onClick={onClose}>
+      <section className="settings-modal" role="dialog" aria-modal="true" aria-label="Ustawienia agenta" onClick={(event) => event.stopPropagation()}>
+        <header>
+          <div>
+            <h2>{settings.display_name || settings.name}</h2>
+            <p>{settings.description || "Brak opisu."}</p>
+          </div>
+          <button type="button" onClick={onClose}>
+            Zamknij
+          </button>
+        </header>
+        <div className="settings-grid">
+          <section>
+            <h3>Konfiguracja</h3>
+            {rows.map(([label, value]) => (
+              <div className="kv-line" key={label}>
+                <span>{label}</span>
+                <strong>{String(value || "-")}</strong>
+              </div>
+            ))}
+          </section>
+          <section>
+            <h3>Skills</h3>
+            <TagList values={settings.skills || []} empty="Brak skills." />
+            <h3>Tools</h3>
+            <TagList values={settings.tools || []} empty="Brak tools." />
+            <h3>Relacje</h3>
+            <TagList values={[...(settings.delegates_to || []), ...(settings.validates || [])]} empty="Brak relacji." />
+          </section>
+        </div>
+        <section className="prompt-section">
+          <h3>Prompt</h3>
+          <pre>{settings.prompt || "Brak promptu."}</pre>
+        </section>
+      </section>
+    </div>
+  );
+}
+
+function TagList({ values, empty }) {
+  return values.length ? (
+    <div className="tag-list">
+      {values.map((value) => (
+        <span key={value}>{value}</span>
+      ))}
+    </div>
+  ) : (
+    <p className="muted">{empty}</p>
+  );
+}
+
 function ArtifactLink({ path }) {
   if (!path) return null;
   return (
@@ -659,6 +747,24 @@ function formatNumber(value) {
 function compactOption(value) {
   const text = String(value || "").replace(/\s+/g, " ").trim();
   return text.length > 42 ? `${text.slice(0, 42)}...` : text;
+}
+
+function displayAgentName(agent) {
+  if (!agent) return "-";
+  const names = {
+    main: "Main Communications Officer",
+    supervisor: "Task Supervisor",
+    analyst_positive: "Positive Analyst",
+    analyst_negative: "Negative Analyst",
+    analyst_neutral: "Neutral Analyst Arbiter",
+    researcher_negative: "Research Critic",
+    researcher: "Neutral Researcher Arbiter",
+    builder: "Builder",
+    reviewer_positive: "Positive Quality Reviewer",
+    reviewer_negative: "Quality and Security Guardian",
+    reviewer: "Neutral Review Arbiter"
+  };
+  return agent.display_name || names[agent.name] || String(agent.name || "").replace(/_/g, " ");
 }
 
 function buildRunFlow(events, rooms, mode = "desktop", size = { width: 1000, height: 850 }, selected, onSelect) {

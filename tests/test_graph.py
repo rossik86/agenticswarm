@@ -7,6 +7,7 @@ from app.agents.runner import AgentRunResult
 from app.artifacts.manager import ArtifactManager
 from app.config.loader import load_config
 from app.graph.builder import build_graph
+from app.graph.nodes import ANALYST_PANEL, RESEARCH_PANEL, REVIEW_PANEL
 
 
 class FakeRunner:
@@ -67,3 +68,9 @@ def test_graph_writes_specialist_and_review_artifacts(tmp_path: Path) -> None:
     assert (tmp_path / "runs" / "test-run" / "researcher.md").exists()
     assert (tmp_path / "runs" / "test-run" / "builder.md").exists()
     assert (tmp_path / "runs" / "test-run" / "review.md").exists()
+
+
+def test_council_order_uses_neutral_as_final_arbiter() -> None:
+    assert ANALYST_PANEL == ["analyst_positive", "analyst_negative", "analyst_neutral"]
+    assert RESEARCH_PANEL == ["researcher_negative", "researcher"]
+    assert REVIEW_PANEL == ["reviewer_positive", "reviewer_negative", "reviewer"]

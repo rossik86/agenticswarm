@@ -48,6 +48,7 @@ class ObservabilityConfig(BaseModel):
 class AgentConfig(BaseModel):
     type: AgentType
     provider: ProviderType | None = None
+    display_name: str | None = None
     description: str = ""
     skills: list[str] = Field(default_factory=list)
     model: str | None = None

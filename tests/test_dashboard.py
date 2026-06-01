@@ -13,14 +13,21 @@ from app.dashboard import (
     read_recent_events,
     read_runs,
     read_status,
+    read_agent_settings,
     render_dashboard,
     render_town,
 )
+from app.config.loader import load_config
 
 
 def test_dashboard_reads_latest_status_and_renders_agents(tmp_path: Path) -> None:
     manager = ArtifactManager(tmp_path, Path("runs"))
-    manager.start_run("run-1", "Check status", ["main"])
+    manager.start_run(
+        "run-1",
+        "Check status",
+        ["main"],
+        {"main": {"display_name": "Main Communications Officer", "skills": ["conversation"], "tools": [], "prompt_path": "prompts/main.md"}},
+    )
     manager.record_agent_usage("run-1", "main", {"total_tokens": 1234, "source": "codex_cli"})
     manager.update_agent("run-1", "main", "completed", "Done")
     manager.finish_run("run-1", "completed", "Final")
@@ -43,6 +50,8 @@ def test_dashboard_reads_latest_status_and_renders_agents(tmp_path: Path) -> Non
     assert "agent.main.completed" in html
     assert status["token_usage"]["total_tokens"] == 1234
     assert status["token_usage"]["by_role"]["main"]["total_tokens"] == 1234
+    assert status["agents"]["main"]["display_name"] == "Main Communications Officer"
+    assert status["agents"]["main"]["skills"] == ["conversation"]
 
 
 def test_town_view_renders_role_buildings(tmp_path: Path) -> None:
@@ -109,3 +118,14 @@ def test_dashboard_lists_runs_and_reads_artifact_only_run(tmp_path: Path) -> Non
     manual = read_status(tmp_path / "runs", "manual-run")
     assert manual["status"] == "artifact_only"
     assert manual["artifacts"][0]["summary"] == "plan.md"
+
+
+def test_dashboard_reads_agent_settings_from_config() -> None:
+    project_root = Path(__file__).resolve().parents[1]
+    config = load_config(project_root / "configs" / "agents.yaml")
+
+    settings = read_agent_settings(project_root, config, "analyst_neutral")
+
+    assert settings["display_name"] == "Neutral Analyst Arbiter"
+    assert "analysis" in settings["skills"]
+    assert "You are the neutral analyst" in settings["prompt"]

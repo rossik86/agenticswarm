@@ -37,6 +37,7 @@ max_review_retries: 1
 agents:
   main:
     type: main
+    display_name: Main Communications Officer
     description: Main conversational loop. Interprets user intent and returns final CLI answers.
     skills:
       - conversation
@@ -51,6 +52,7 @@ agents:
 
   supervisor:
     type: supervisor
+    display_name: Task Supervisor
     description: Breaks user requests into narrow specialist tasks.
     skills:
       - planning
@@ -71,6 +73,7 @@ agents:
 
   analyst_neutral:
     type: specialist
+    display_name: Neutral Analyst Arbiter
     description: Neutral analyst. Clarifies intent, asks practical questions, and produces balanced analysis.
     skills:
       - analysis
@@ -85,6 +88,7 @@ agents:
 
   analyst_positive:
     type: specialist
+    display_name: Positive Analyst
     description: Positive analyst. Finds strengths, opportunities, and approaches likely to work.
     skills:
       - opportunity_analysis
@@ -99,6 +103,7 @@ agents:
 
   analyst_negative:
     type: specialist
+    display_name: Negative Analyst
     description: Negative analyst. Grills assumptions, finds holes, contradictions, and weak reasoning.
     skills:
       - grill_me
@@ -113,6 +118,7 @@ agents:
 
   researcher:
     type: specialist
+    display_name: Neutral Researcher Arbiter
     description: Produces research, analysis, specifications, and decision notes.
     skills:
       - research
@@ -127,6 +133,7 @@ agents:
 
   researcher_negative:
     type: specialist
+    display_name: Research Critic
     description: Research critic. Challenges whether research is complete, current, and relevant.
     skills:
       - research_grilling
@@ -141,6 +148,7 @@ agents:
 
   builder:
     type: specialist
+    display_name: Builder
     description: Builds the actual solution for the task. Uses available tools, UI/UX plugins, and implementation discipline.
     skills:
       - implementation
@@ -156,6 +164,7 @@ agents:
 
   reviewer:
     type: reviewer
+    display_name: Neutral Review Arbiter
     description: Neutral reviewer. Reviews artifacts and decides whether another pass is needed.
     skills:
       - review
@@ -173,6 +182,7 @@ agents:
 
   reviewer_negative:
     type: reviewer
+    display_name: Quality and Security Guardian
     description: Quality and security guardian. Looks for correctness, safety, security, and maintainability failures.
     skills:
       - quality_gate
@@ -189,6 +199,7 @@ agents:
 
   reviewer_positive:
     type: reviewer
+    display_name: Positive Quality Reviewer
     description: Positive quality reviewer. Finds strong parts, language-specific good practices, and durable choices.
     skills:
       - quality_superpowers

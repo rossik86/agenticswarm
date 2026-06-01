@@ -13,9 +13,9 @@ from app.memory.store import MemoryStore
 from app.observability.manager import Observability
 
 
-ANALYST_PANEL = ["analyst_neutral", "analyst_positive", "analyst_negative"]
-RESEARCH_PANEL = ["researcher", "researcher_negative"]
-REVIEW_PANEL = ["reviewer", "reviewer_negative", "reviewer_positive"]
+ANALYST_PANEL = ["analyst_positive", "analyst_negative", "analyst_neutral"]
+RESEARCH_PANEL = ["researcher_negative", "researcher"]
+REVIEW_PANEL = ["reviewer_positive", "reviewer_negative", "reviewer"]
 
 
 class SwarmNodes:
@@ -64,6 +64,11 @@ class SwarmNodes:
                     "user_request": state["user_input"],
                     "memory_context": state.get("memory_context", ""),
                     "panel_role": agent_name,
+                    "prior_council_outputs": panel_results,
+                    "council_instruction": (
+                        "Council order is positive first, negative second, neutral last. "
+                        "If you are the neutral analyst, arbitrate the prior positive and negative positions and decide the final specification."
+                    ),
                 },
                 "Analysis panel",
             )
@@ -131,6 +136,11 @@ class SwarmNodes:
                     "analysis": state.get("analysis"),
                     "plan": state.get("plan"),
                     "panel_role": agent_name,
+                    "prior_council_outputs": panel_results,
+                    "council_instruction": (
+                        "Council order is critic first, neutral researcher last. "
+                        "If you are the neutral researcher, arbitrate the critique and decide the final research note."
+                    ),
                 },
                 "Research panel",
             )
@@ -175,6 +185,11 @@ class SwarmNodes:
                     "research": state.get("research_result"),
                     "build": state.get("build_result"),
                     "existing_artifacts": state.get("artifacts", []),
+                    "prior_council_outputs": panel_results,
+                    "council_instruction": (
+                        "Council order is positive first, negative second, neutral reviewer last. "
+                        "If you are the neutral reviewer, arbitrate prior reviews and make the final quality decision."
+                    ),
                 },
                 "Review panel",
             )

@@ -59,6 +59,11 @@ def serve_dashboard(project_root: Path, config_path: Path, host: str = "127.0.0.
             if parsed.path == "/runs.json":
                 self._send_json({"runs": read_runs(artifact_root)})
                 return
+            if parsed.path == "/agent-settings.json":
+                params = parse_qs(parsed.query)
+                agent_name = params.get("agent", [""])[0]
+                self._send_json({"agent": read_agent_settings(project_root, config, agent_name)})
+                return
             if parsed.path == "/events.json":
                 params = parse_qs(parsed.query)
                 self._send_json({"events": read_recent_events(events_path, limit=300, run_id=params.get("run_id", [None])[0])})
@@ -261,6 +266,34 @@ def read_runs(artifact_root: Path, limit: int = 80) -> list[dict[str, object]]:
         if len(runs) >= limit:
             break
     return runs
+
+
+def read_agent_settings(project_root: Path, config: object, agent_name: str) -> dict[str, object]:
+    agents = getattr(config, "agents", {})
+    agent = agents.get(agent_name) if isinstance(agents, dict) else None
+    if not agent:
+        return {"name": agent_name, "status": "not_found", "prompt": "", "skills": [], "tools": []}
+    prompt_path = getattr(agent, "prompt", None)
+    prompt_text = ""
+    if prompt_path:
+        path = (project_root / prompt_path).resolve()
+        root = project_root.resolve()
+        if (root in path.parents or path == root) and path.exists() and path.is_file():
+            prompt_text = path.read_text(encoding="utf-8")
+    return {
+        "name": agent_name,
+        "display_name": getattr(agent, "display_name", None) or agent_name.replace("_", " ").title(),
+        "description": getattr(agent, "description", ""),
+        "type": getattr(agent, "type", ""),
+        "skills": getattr(agent, "skills", []),
+        "tools": getattr(agent, "tools", []),
+        "delegates_to": getattr(agent, "delegates_to", []),
+        "validates": getattr(agent, "validates", []),
+        "model": getattr(agent, "model", None),
+        "temperature": getattr(agent, "temperature", None),
+        "prompt_path": str(prompt_path) if prompt_path else "",
+        "prompt": prompt_text,
+    }
 
 
 def _path_timestamp(path: Path) -> str:

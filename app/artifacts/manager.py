@@ -36,8 +36,15 @@ class ArtifactManager:
         self.artifact_root.mkdir(parents=True, exist_ok=True)
         return self.artifact_root / "latest.json"
 
-    def start_run(self, run_id: str, user_input: str, agent_names: list[str]) -> None:
+    def start_run(
+        self,
+        run_id: str,
+        user_input: str,
+        agent_names: list[str],
+        agent_metadata: dict[str, dict[str, Any]] | None = None,
+    ) -> None:
         now = _timestamp()
+        metadata = agent_metadata or {}
         status = {
             "run_id": run_id,
             "status": "running",
@@ -48,6 +55,11 @@ class ArtifactManager:
             "agents": {
                 agent_name: {
                     "name": agent_name,
+                    "display_name": metadata.get(agent_name, {}).get("display_name") or _agent_display_name(agent_name),
+                    "description": metadata.get(agent_name, {}).get("description", ""),
+                    "skills": metadata.get(agent_name, {}).get("skills", []),
+                    "tools": metadata.get(agent_name, {}).get("tools", []),
+                    "prompt_path": metadata.get(agent_name, {}).get("prompt_path"),
                     "role": _agent_role(agent_name),
                     "stance": _agent_stance(agent_name),
                     "status": "idle",
@@ -88,6 +100,11 @@ class ArtifactManager:
             agent_name,
             {
                 "name": agent_name,
+                "display_name": _agent_display_name(agent_name),
+                "description": "",
+                "skills": [],
+                "tools": [],
+                "prompt_path": None,
                 "role": _agent_role(agent_name),
                 "stance": _agent_stance(agent_name),
                 "status": "idle",
@@ -125,6 +142,11 @@ class ArtifactManager:
             agent_name,
             {
                 "name": agent_name,
+                "display_name": _agent_display_name(agent_name),
+                "description": "",
+                "skills": [],
+                "tools": [],
+                "prompt_path": None,
                 "role": _agent_role(agent_name),
                 "stance": _agent_stance(agent_name),
                 "status": "idle",
@@ -229,6 +251,23 @@ def _agent_stance(agent_name: str) -> str:
     if agent_name.endswith("_neutral") or agent_name in {"main", "supervisor", "researcher", "builder", "reviewer"}:
         return "neutral"
     return "neutral"
+
+
+def _agent_display_name(agent_name: str) -> str:
+    names = {
+        "main": "Main Communications Officer",
+        "supervisor": "Task Supervisor",
+        "analyst_positive": "Positive Analyst",
+        "analyst_negative": "Negative Analyst",
+        "analyst_neutral": "Neutral Analyst Arbiter",
+        "researcher_negative": "Research Critic",
+        "researcher": "Neutral Researcher Arbiter",
+        "builder": "Builder",
+        "reviewer_positive": "Positive Quality Reviewer",
+        "reviewer_negative": "Quality and Security Guardian",
+        "reviewer": "Neutral Review Arbiter",
+    }
+    return names.get(agent_name, agent_name.replace("_", " ").title())
 
 
 def _roles(agent_names: list[str]) -> dict[str, list[str]]:

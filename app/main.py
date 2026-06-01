@@ -43,7 +43,7 @@ class SwarmApp:
 
     async def run_turn(self, user_input: str) -> AgentState:
         run_id = self.artifacts.create_run_id()
-        self.artifacts.start_run(run_id, user_input, list(self.config.agents))
+        self.artifacts.start_run(run_id, user_input, list(self.config.agents), self._agent_metadata())
         self.observability.emit(run_id, "run.started", {"user_input": user_input})
         memory_context = self.memory.context_for(user_input) if self.memory else ""
         initial_state: AgentState = {
@@ -68,3 +68,15 @@ class SwarmApp:
             self.memory.remember(run_id, "main", str(result["final_answer"]))
         self.observability.emit(run_id, "run.completed", {"final_answer": result.get("final_answer")})
         return result
+
+    def _agent_metadata(self) -> dict[str, dict[str, object]]:
+        return {
+            name: {
+                "display_name": agent.display_name,
+                "description": agent.description,
+                "skills": agent.skills,
+                "tools": agent.tools,
+                "prompt_path": str(agent.prompt),
+            }
+            for name, agent in self.config.agents.items()
+        }
