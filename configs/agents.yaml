@@ -224,7 +224,7 @@ agents:
       - evaluator_optimizer
       - flow_improvement
       - quality_control
-    model: gpt-5.4-mini
+    model: gpt-5.5
     temperature: 0.1
     prompt: prompts/self_learner.md
     tools:

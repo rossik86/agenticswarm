@@ -7,7 +7,7 @@ from langgraph.graph import END, START, StateGraph
 from app.agents.runner import AgentRunner
 from app.artifacts.manager import ArtifactManager
 from app.config.schema import SwarmConfig
-from app.graph.nodes import SwarmNodes, should_delegate, should_retry_review
+from app.graph.nodes import SwarmNodes, should_delegate, should_retry_builder_completeness, should_retry_review
 from app.graph.state import AgentState
 from app.checkpoint.store import CheckpointStore
 from app.memory.store import MemoryStore
@@ -39,6 +39,7 @@ def build_graph(
     graph.add_node("supervisor_route", nodes.supervisor_route)
     graph.add_node("research_panel", nodes.research_panel)
     graph.add_node("build_solution", nodes.build_solution)
+    graph.add_node("builder_completeness_gate", nodes.builder_completeness_gate)
     graph.add_node("review_panel", nodes.review_panel)
     graph.add_node("supervisor_gate", nodes.supervisor_gate)
     graph.add_node("self_learning", nodes.self_learning)
@@ -56,7 +57,15 @@ def build_graph(
     graph.add_edge("supervisor_route", "research_panel")
     graph.add_edge("research_panel", "analyst_panel")
     graph.add_edge("analyst_panel", "build_solution")
-    graph.add_edge("build_solution", "review_panel")
+    graph.add_edge("build_solution", "builder_completeness_gate")
+    graph.add_conditional_edges(
+        "builder_completeness_gate",
+        lambda state: should_retry_builder_completeness(state, config.max_review_retries),
+        {
+            "retry": "build_solution",
+            "review": "review_panel",
+        },
+    )
     graph.add_edge("review_panel", "supervisor_gate")
     graph.add_conditional_edges(
         "supervisor_gate",

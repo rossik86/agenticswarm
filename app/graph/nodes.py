@@ -196,13 +196,21 @@ class SwarmNodes:
                 "research": state.get("research_result"),
                 "plan": state.get("plan"),
                 "review_feedback": state.get("quality_result"),
-                "instruction": "Build the requested solution or produce the exact implementation artifact. Include TDD/BDD verification for code tasks.",
+                "instruction": (
+                    "Produce the requested deliverable itself. Do not return a meta-plan, checklist, or implementation notes as the primary output. "
+                    "For Markdown/specification/planning tasks, write the complete Markdown document body with substantive sections and concrete TDD/BDD cases when requested. "
+                    "For learning-based refinement tasks, incorporate the learning recommendations into the finished artifact and include a short 'Co poprawiono wedlug learningu' section."
+                ),
             },
             "Builder",
         )
         artifacts = [*state.get("artifacts", []), metadata]
         build_result = {"summary": metadata["summary"], "artifact_path": metadata["artifact_path"], "text": result.text[:2000]}
-        update = {"build_result": build_result, "artifacts": artifacts}
+        update = {
+            "build_result": build_result,
+            "artifacts": artifacts,
+            "builder_attempts": state.get("builder_attempts", 0) + 1,
+        }
         self.artifacts.record_room_io(
             state["run_id"],
             "builder",
@@ -211,6 +219,21 @@ class SwarmNodes:
             metadata["summary"],
         )
         self._checkpoint(state["run_id"], "build_solution", {**state, **update})
+        return update
+
+    async def builder_completeness_gate(self, state: AgentState) -> AgentState:
+        run_id = state["run_id"]
+        build_result = state.get("build_result") or {}
+        text = str(build_result.get("text") or "")
+        artifact_path = build_result.get("artifact_path")
+        if artifact_path:
+            path = Path(str(artifact_path))
+            if path.exists() and path.is_file():
+                text = path.read_text(encoding="utf-8", errors="replace")
+        result = validate_builder_completeness(text, state["user_input"])
+        update = {"builder_completeness": result}
+        self.artifacts.record_room_io(run_id, "builder", build_result, result, str(result.get("summary", "")))
+        self._checkpoint(run_id, "builder_completeness_gate", {**state, **update})
         return update
 
     async def review_panel(self, state: AgentState) -> AgentState:
@@ -438,6 +461,41 @@ def should_retry_review(state: AgentState, max_review_retries: int) -> str:
     ):
         return "retry"
     return "final"
+
+
+def should_retry_builder_completeness(state: AgentState, max_attempts: int) -> str:
+    completeness = state.get("builder_completeness") or {}
+    attempts = state.get("builder_attempts", 0)
+    if completeness.get("status") == "needs_revision" and attempts <= max_attempts:
+        return "retry"
+    return "review"
+
+
+def validate_builder_completeness(text: str, user_request: str) -> dict[str, Any]:
+    body = str(text or "").strip()
+    request = str(user_request or "").lower()
+    lower = body.lower()
+    issues: list[str] = []
+    wants_spec = any(term in request for term in ["spec", "specyfik", "markdown", "plan aplikacji", "tdd", "bdd"])
+    meta_markers = ["build objective", "implementation steps", "files or components", "remaining risks", "verification result"]
+    if any(marker in lower for marker in meta_markers):
+        issues.append("builder output looks like a meta-plan instead of the requested deliverable")
+    if wants_spec:
+        headings = body.count("\n## ") + (1 if body.startswith("## ") else 0)
+        if len(body) < 4500:
+            issues.append("spec/document artifact is too short to be complete")
+        if headings < 5:
+            issues.append("spec/document artifact has too few substantive sections")
+        if "bdd" in request and "given" not in lower:
+            issues.append("BDD scenarios are missing expected Given/When/Then content")
+        if "tdd" in request and "expected" not in lower and "oczekiw" not in lower:
+            issues.append("TDD cases are missing expected results")
+    status = "needs_revision" if issues else "accepted"
+    return {
+        "status": status,
+        "issues": issues,
+        "summary": "Builder artifact accepted by completeness gate." if status == "accepted" else "; ".join(issues),
+    }
 
 
 def _parse_review_text(text: str) -> dict[str, Any]:

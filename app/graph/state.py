@@ -13,6 +13,8 @@ class AgentState(TypedDict, total=False):
     analysis: dict[str, Any] | None
     research_result: dict[str, Any] | None
     build_result: dict[str, Any] | None
+    builder_completeness: dict[str, Any] | None
+    builder_attempts: int
     quality_result: dict[str, Any] | None
     supervisor_gate: dict[str, Any] | None
     learning_result: dict[str, Any] | None

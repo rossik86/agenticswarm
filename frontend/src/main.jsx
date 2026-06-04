@@ -6,17 +6,32 @@ import {
   Activity,
   AlertTriangle,
   Boxes,
+  BrainCircuit,
+  Calendar,
   CheckCircle2,
   Clock3,
+  Database,
+  FileText,
+  Filter,
+  PanelLeft,
   Play,
+  Plus,
   RotateCcw,
+  Save,
+  Search,
   Settings,
   TerminalSquare,
+  Trash2,
+  GitCompare,
+  History,
+  ClipboardList,
   XCircle
 } from "lucide-react";
 import roomTile from "./assets/pixel-room.png";
 import commandRoom from "./assets/pixel-command-room.png";
 import robotSprite from "./assets/pixel-robot.png";
+import { buildFlowSteps, flowStatusFromEvent, greenShade, roleFromEvent } from "./flowUtils.js";
+import { compactRunId, filterRuns, formatRunDate, runPreview, runTimestamp, runTitle } from "./runUtils.js";
 import "./styles.css";
 
 const ROOMS = [
@@ -54,6 +69,11 @@ function App() {
   const [modal, setModal] = useState(null);
   const [agentSettings, setAgentSettings] = useState(null);
   const [settingsDrawerOpen, setSettingsDrawerOpen] = useState(false);
+  const [resourcesDrawerOpen, setResourcesDrawerOpen] = useState(false);
+  const [resources, setResources] = useState(null);
+  const [learningPending, setLearningPending] = useState(false);
+  const [inspectorOpen, setInspectorOpen] = useState(true);
+  const [runsDrawerOpen, setRunsDrawerOpen] = useState(false);
   const [notice, setNotice] = useState("");
 
   async function refresh() {
@@ -108,45 +128,104 @@ function App() {
           <h1>Multiagent Swarm Town</h1>
           <p>Pixel-art operations view, odświeżanie co 5 sekund</p>
         </div>
-        <RunStatus status={status} runs={runs} selectedRunId={selectedRunId} onSelectRun={setSelectedRunId} />
+        <RunStatus
+          status={status}
+          runs={runs}
+          selectedRunId={selectedRunId}
+          onSelectRun={setSelectedRunId}
+          onOpenRuns={() => setRunsDrawerOpen(true)}
+        />
       </header>
 
       <section className="workspace">
-        <OfficeMap rooms={rooms} onSelect={setSelected} selected={selected} events={events} agents={agents} />
-        <Inspector
-          status={status}
-          events={events}
-          checkpoints={checkpoints}
-          selectedAgent={selectedAgent}
-          selectedRoom={selectedRoom}
-          onOpenText={setModal}
-          onCheckpointAction={async (action, checkpoint) => {
-            const pendingKey = `${action}-${checkpoint.id}`;
-            setPendingCheckpoint(pendingKey);
-            setNotice(`${action === "resume" ? "Wznawiam" : "Restartuję"} checkpoint ${checkpoint.node}...`);
-            try {
-              const response = await fetch(`/checkpoint/${action}`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ checkpoint_id: checkpoint.id, run_id: checkpoint.run_id, node: checkpoint.node })
-              }).then((item) => item.json());
-              setNotice(response.message || "Akcja checkpointu przyjęta.");
-              await refresh();
-            } finally {
-              window.setTimeout(() => setPendingCheckpoint(null), 1200);
-            }
-          }}
-          pendingCheckpoint={pendingCheckpoint}
-          onOpenAgentSettings={async (agent) => {
-            setNotice(`Pobieram ustawienia: ${displayAgentName(agent)}`);
-            const settings = await fetch(`/agent-settings.json?agent=${encodeURIComponent(agent.name)}`, { cache: "no-store" }).then((item) =>
-              item.json()
-            );
-            setAgentSettings(settings.agent);
-            setSettingsDrawerOpen(true);
+        <button
+          className="global-config-trigger"
+          type="button"
+          title="Zarządzanie agentami, skillami i MCP"
+          onClick={async () => {
+            setNotice("Pobieram globalną konfigurację.");
+            const data = await fetch("/resources.json", { cache: "no-store" }).then((item) => item.json());
+            setResources(data);
+            setResourcesDrawerOpen(true);
             setNotice("");
           }}
+        >
+          <PanelLeft size={18} />
+        </button>
+        <OfficeMap
+          rooms={rooms}
+          onSelect={(nextSelection) => {
+            setSelected(nextSelection);
+            setInspectorOpen(true);
+          }}
+          selected={selected}
+          events={events}
+          agents={agents}
         />
+        <button
+          className="inspector-trigger"
+          type="button"
+          title="Pokaż dane pokoju/agenta"
+          onClick={() => setInspectorOpen(true)}
+        >
+          <TerminalSquare size={18} />
+        </button>
+        <aside className={`inspector-drawer ${inspectorOpen ? "open" : ""}`} aria-label="Dane pokoju lub agenta">
+          <button className="drawer-close" type="button" onClick={() => setInspectorOpen(false)}>
+            Zamknij
+          </button>
+          <Inspector
+            status={status}
+            events={events}
+            checkpoints={checkpoints}
+            selectedAgent={selectedAgent}
+            selectedRoom={selectedRoom}
+            onOpenText={setModal}
+            onCheckpointAction={async (action, checkpoint) => {
+              const pendingKey = `${action}-${checkpoint.id}`;
+              setPendingCheckpoint(pendingKey);
+              setNotice(`${action === "resume" ? "Wznawiam" : "Restartuję"} checkpoint ${checkpoint.node}...`);
+              try {
+                const response = await fetch(`/checkpoint/${action}`, {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ checkpoint_id: checkpoint.id, run_id: checkpoint.run_id, node: checkpoint.node })
+                }).then((item) => item.json());
+                setNotice(response.message || "Akcja checkpointu przyjęta.");
+                await refresh();
+              } finally {
+                window.setTimeout(() => setPendingCheckpoint(null), 1200);
+              }
+            }}
+            pendingCheckpoint={pendingCheckpoint}
+            onOpenAgentSettings={async (agent) => {
+              setNotice(`Pobieram konfigurację agenta: ${displayAgentName(agent)}`);
+              const settings = await fetch(`/agent-settings.json?agent=${encodeURIComponent(agent.name)}`, { cache: "no-store" }).then((item) =>
+                item.json()
+              );
+              setAgentSettings(settings.agent);
+              setSettingsDrawerOpen(true);
+              setNotice("");
+            }}
+            learningPending={learningPending}
+            onImproveFromLearning={async () => {
+              if (!status?.run_id) return;
+              setLearningPending(true);
+              setNotice("Przygotowuję plan poprawy według learningu.");
+              try {
+                const response = await fetch("/learning/improve", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ run_id: status.run_id })
+                }).then((item) => item.json());
+                setNotice(response.message || "Akcja learning improvement przyjęta.");
+                await refresh();
+              } finally {
+                setLearningPending(false);
+              }
+            }}
+          />
+        </aside>
       </section>
 
       {notice ? (
@@ -158,7 +237,6 @@ function App() {
       {settingsDrawerOpen ? (
         <AgentSettingsDrawer
           settings={agentSettings}
-          agents={agents}
           onSelectAgent={async (agentName) => {
             const settings = await fetch(`/agent-settings.json?agent=${encodeURIComponent(agentName)}`, { cache: "no-store" }).then((item) =>
               item.json()
@@ -179,28 +257,174 @@ function App() {
           }}
         />
       ) : null}
+      {resourcesDrawerOpen ? (
+        <GlobalResourcesDrawer
+          resources={resources}
+          runs={runs}
+          onOpenText={setModal}
+          onClose={() => setResourcesDrawerOpen(false)}
+          onReload={async () => {
+            const data = await fetch("/resources.json", { cache: "no-store" }).then((item) => item.json());
+            setResources(data);
+          }}
+          onSave={async (payload) => {
+            const response = await fetch("/resources.json", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(payload)
+            }).then((item) => item.json());
+            setNotice(response.message || "Zasób zapisany.");
+            const data = await fetch("/resources.json", { cache: "no-store" }).then((item) => item.json());
+            setResources(data);
+            await refresh();
+          }}
+        />
+      ) : null}
+      {runsDrawerOpen ? (
+        <RunPickerDrawer
+          status={status}
+          runs={runs}
+          selectedRunId={selectedRunId}
+          onSelectRun={(runId) => {
+            setSelectedRunId(runId);
+            setRunsDrawerOpen(false);
+          }}
+          onClose={() => setRunsDrawerOpen(false)}
+        />
+      ) : null}
     </main>
   );
 }
 
-function RunStatus({ status, runs, selectedRunId, onSelectRun }) {
+function RunStatus({ status, runs, selectedRunId, onOpenRuns }) {
   const state = status?.status || "waiting";
   const Icon = state === "completed" ? CheckCircle2 : state === "failed" ? XCircle : Activity;
+  const currentRun = status?.run_id ? { ...status, run_id: status.run_id } : null;
   return (
     <div className={`run-status ${state}`}>
-      <Icon size={18} />
-      <span>{state}</span>
-      <small>{status?.run_id || "no-run"}</small>
-      <select value={selectedRunId} onChange={(event) => onSelectRun(event.target.value)} title="Wybierz run">
-        <option value="">latest</option>
-        {runs.map((run) => (
-          <option value={run.run_id} key={run.run_id}>
-            {run.run_id} · {run.status} · {compactOption(run.user_input) || "no input"}
-            {" -> "}
-            {compactOption(run.final_answer) || `${run.artifact_count || 0} md`}
-          </option>
-        ))}
-      </select>
+      <div className="run-status-main">
+        <Icon size={18} />
+        <span>{state}</span>
+        <strong>{currentRun ? runTitle(currentRun) : "Brak aktywnego runu"}</strong>
+        <small>
+          {selectedRunId ? "selected" : "latest"} · {compactRunId(status?.run_id)} · {formatRunDate(runTimestamp(status))}
+        </small>
+      </div>
+      <button className="run-status-button" type="button" onClick={onOpenRuns} title="Pokaż listę runów">
+        <History size={15} />
+        Runs
+        <em>{runs.length}</em>
+      </button>
+    </div>
+  );
+}
+
+function RunPickerDrawer({ status, runs, selectedRunId, onSelectRun, onClose }) {
+  const [query, setQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [datePreset, setDatePreset] = useState("all");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+  const [sort, setSort] = useState("newest");
+  const visibleRuns = useMemo(
+    () => filterRuns(runs, { query, status: statusFilter, datePreset, dateFrom, dateTo, sort }),
+    [runs, query, statusFilter, datePreset, dateFrom, dateTo, sort]
+  );
+  const activeRunId = selectedRunId || status?.run_id || "";
+  return (
+    <div className="drawer-backdrop" role="presentation" onClick={onClose}>
+      <section className="run-picker-drawer" role="dialog" aria-modal="true" aria-label="Lista runów" onClick={(event) => event.stopPropagation()}>
+        <header>
+          <div>
+            <h2>Runs</h2>
+            <p>{visibleRuns.length} / {runs.length} widocznych</p>
+          </div>
+          <button type="button" onClick={onClose}>Zamknij</button>
+        </header>
+        <div className="run-search-box">
+          <Search size={15} />
+          <input
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="Szukaj po nazwie, wyniku, ID..."
+            autoFocus
+          />
+        </div>
+        <div className="run-filter-grid">
+          <label>
+            <span><Filter size={13} /> Status</span>
+            <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
+              <option value="all">wszystkie</option>
+              <option value="running">running</option>
+              <option value="completed">completed</option>
+              <option value="failed">failed</option>
+              <option value="artifact_only">artifact only</option>
+            </select>
+          </label>
+          <label>
+            <span><Calendar size={13} /> Data</span>
+            <select value={datePreset} onChange={(event) => setDatePreset(event.target.value)}>
+              <option value="all">cały zakres</option>
+              <option value="today">dzisiaj</option>
+              <option value="7d">ostatnie 7 dni</option>
+            </select>
+          </label>
+          <label>
+            <span>Sort</span>
+            <select value={sort} onChange={(event) => setSort(event.target.value)}>
+              <option value="newest">najnowsze</option>
+              <option value="oldest">najstarsze</option>
+              <option value="failed">błędy najpierw</option>
+            </select>
+          </label>
+          <label>
+            <span>Od</span>
+            <input type="date" value={dateFrom} onChange={(event) => setDateFrom(event.target.value)} />
+          </label>
+          <label>
+            <span>Do</span>
+            <input type="date" value={dateTo} onChange={(event) => setDateTo(event.target.value)} />
+          </label>
+        </div>
+        <div className="run-picker-actions">
+          <button type="button" className={!selectedRunId ? "active" : ""} onClick={() => onSelectRun("")}>
+            Latest
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setQuery("");
+              setStatusFilter("all");
+              setDatePreset("all");
+              setDateFrom("");
+              setDateTo("");
+              setSort("newest");
+            }}
+          >
+            Wyczyść filtry
+          </button>
+        </div>
+        <div className="run-card-list">
+          {visibleRuns.length ? visibleRuns.map((run) => (
+            <button
+              type="button"
+              className={`run-card ${run.run_id === activeRunId ? "active" : ""} ${run.status || "unknown"}`}
+              key={run.run_id}
+              onClick={() => onSelectRun(run.run_id)}
+            >
+              <div>
+                <strong>{runTitle(run)}</strong>
+                <span>{runPreview(run)}</span>
+              </div>
+              <aside>
+                <mark>{run.status || "unknown"}</mark>
+                <small>{formatRunDate(runTimestamp(run))}</small>
+                <code>{compactRunId(run.run_id)}</code>
+              </aside>
+            </button>
+          )) : <p className="muted">Brak runów pasujących do filtrów.</p>}
+        </div>
+      </section>
     </div>
   );
 }
@@ -209,11 +433,20 @@ function OfficeMap({ rooms, onSelect, selected, events, agents }) {
   const officeRef = useRef(null);
   const [flowMode, setFlowMode] = useState(() => getFlowMode());
   const [officeSize, setOfficeSize] = useState({ width: 1000, height: 850 });
+  const steps = useMemo(() => buildFlowSteps(events), [events]);
+  const [activeStep, setActiveStep] = useState(0);
   useEffect(() => {
     const updateMode = () => setFlowMode(getFlowMode());
     window.addEventListener("resize", updateMode);
     return () => window.removeEventListener("resize", updateMode);
   }, []);
+  useEffect(() => {
+    setActiveStep((current) => {
+      if (!steps.length) return 0;
+      if (current <= 0 || current > steps.length) return steps.length;
+      return current;
+    });
+  }, [steps.length]);
   useEffect(() => {
     if (!officeRef.current) return undefined;
     const observer = new ResizeObserver(([entry]) => {
@@ -223,15 +456,43 @@ function OfficeMap({ rooms, onSelect, selected, events, agents }) {
     return () => observer.disconnect();
   }, []);
   const flow = useMemo(
-    () => buildRunFlow(events, rooms, flowMode, officeSize, selected, onSelect),
-    [events, rooms, flowMode, officeSize, selected, onSelect]
+    () => buildRunFlow(events, rooms, flowMode, officeSize, selected, onSelect, activeStep || steps.length, steps),
+    [events, rooms, flowMode, officeSize, selected, onSelect, activeStep, steps]
   );
   return (
-    <section className="office" aria-label="Agent town office" ref={officeRef}>
-      <RunFlowOverlay flow={flow} onSelect={onSelect} selected={selected} />
-      <div className="legacy-rooms" aria-hidden="true">{rooms.map((room) => (
-        <Room key={room.role} room={room} onSelect={onSelect} selected={selected} />
-      ))}</div>
+    <section className="office-shell">
+      <RunProgressPanel steps={steps} activeStep={activeStep || steps.length} onSelectStep={setActiveStep} />
+      <section className="office" aria-label="Agent town office" ref={officeRef}>
+        <RunFlowOverlay flow={flow} onSelect={onSelect} selected={selected} />
+        <div className="legacy-rooms" aria-hidden="true">{rooms.map((room) => (
+          <Room key={room.role} room={room} onSelect={onSelect} selected={selected} />
+        ))}</div>
+      </section>
+    </section>
+  );
+}
+
+function RunProgressPanel({ steps, activeStep, onSelectStep }) {
+  return (
+    <section className="run-progress-panel" aria-label="Postęp runu checkpoint po checkpointcie">
+      <div>
+        <strong>Run progress</strong>
+        <span>{steps.length ? `krok ${activeStep} / ${steps.length}` : "brak kroków"}</span>
+      </div>
+      <div className="progress-steps">
+        {steps.length ? steps.map((step) => (
+          <button
+            type="button"
+            key={`${step.index}-${step.source}-${step.target}`}
+            className={`progress-step ${step.index === activeStep ? "active" : ""} ${step.status}`}
+            onClick={() => onSelectStep(step.index)}
+            title={`${step.source} -> ${step.target} · ${step.event}`}
+          >
+            <span>{step.index}</span>
+            <strong>{step.source} {"->"} {step.target}</strong>
+          </button>
+        )) : <p className="muted">Run nie ma jeszcze zdarzeń flow.</p>}
+      </div>
     </section>
   );
 }
@@ -379,7 +640,9 @@ function Inspector({
   onCheckpointAction,
   pendingCheckpoint,
   onOpenText,
-  onOpenAgentSettings
+  onOpenAgentSettings,
+  learningPending,
+  onImproveFromLearning
 }) {
   if (selectedAgent) {
     const agentEvents = events.filter((event) => String(event.event || "").includes(selectedAgent.name));
@@ -419,7 +682,13 @@ function Inspector({
           <CompactField label="Wyjście pokoju" value={roomIo?.output || roomOutput(room) || "-"} onOpen={onOpenText} />
         </>
       )}
-      <ResultPanel status={status} room={room} onOpen={onOpenText} />
+      <ResultPanel
+        status={status}
+        room={room}
+        onOpen={onOpenText}
+        learningPending={learningPending}
+        onImproveFromLearning={onImproveFromLearning}
+      />
       <TokenUsagePanel usage={status?.token_usage} selectedRole={room?.role} agents={room?.agents || []} showAllRoles={isMainRoom} />
       <CouncilList room={room} />
       <RoomHistory roomIo={roomIo} onOpen={onOpenText} />
@@ -612,12 +881,20 @@ function CompactField({ label, value, onOpen, limit = 220 }) {
   );
 }
 
-function ResultPanel({ status, room, onOpen }) {
+function ResultPanel({ status, room, onOpen, learningPending, onImproveFromLearning }) {
   const artifacts = room?.role === "main" ? collectArtifacts(status) : roomArtifacts(status, room);
   const finalAnswer = status?.final_answer;
+  const learningArtifact = collectArtifacts(status).find((artifact) => artifact.agent === "self_learner");
+  const canImprove = Boolean(onImproveFromLearning && status?.run_id && learningArtifact && status?.status === "completed");
   return (
     <section className="panel-section result-panel">
       <h2>Wynik pracy</h2>
+      {canImprove && (room?.role === "main" || room?.role === "learner") ? (
+        <button className="learning-improve-button" type="button" disabled={learningPending} onClick={onImproveFromLearning}>
+          <BrainCircuit size={14} />
+          {learningPending ? "Przygotowuję plan..." : "Przygotuj poprawę według learningu"}
+        </button>
+      ) : null}
       {room?.role === "main" && finalAnswer ? (
         <CompactField label="Final" value={finalAnswer} onOpen={onOpen} limit={180} />
       ) : (
@@ -691,7 +968,7 @@ function TextModal({ modal, onClose }) {
   );
 }
 
-function AgentSettingsDrawer({ settings, agents, onSelectAgent, onClose, onSave }) {
+function AgentSettingsDrawer({ settings, onClose, onSave }) {
   const [tab, setTab] = useState("runtime");
   const [provider, setProvider] = useState("default");
   const [model, setModel] = useState("");
@@ -716,7 +993,7 @@ function AgentSettingsDrawer({ settings, agents, onSelectAgent, onClose, onSave 
       <div className="drawer-backdrop" role="presentation" onClick={onClose}>
         <aside className="settings-drawer" aria-label="Ustawienia agentów" onClick={(event) => event.stopPropagation()}>
           <header>
-            <h2>Ustawienia agentów</h2>
+            <h2>Konfiguracja agenta</h2>
             <button type="button" onClick={onClose}>Zamknij</button>
           </header>
         </aside>
@@ -735,22 +1012,18 @@ function AgentSettingsDrawer({ settings, agents, onSelectAgent, onClose, onSave 
   ];
   return (
     <div className="drawer-backdrop" role="presentation" onClick={onClose}>
-      <section className="settings-drawer" role="dialog" aria-modal="true" aria-label="Ustawienia agentów" onClick={(event) => event.stopPropagation()}>
+      <section className="settings-drawer agent-config-drawer" role="dialog" aria-modal="true" aria-label="Konfiguracja agenta" onClick={(event) => event.stopPropagation()}>
         <header>
           <div>
-            <h2>Ustawienia agentów</h2>
+            <h2>Konfiguracja agenta</h2>
             <p>{settings.display_name || settings.name}</p>
           </div>
           <button type="button" onClick={onClose}>
             Zamknij
           </button>
         </header>
-        <div className="settings-agent-picker">
-          <select value={settings.name} onChange={(event) => onSelectAgent(event.target.value)}>
-            {agents.map((agent) => (
-              <option key={agent.name} value={agent.name}>{displayAgentName(agent)}</option>
-            ))}
-          </select>
+        <div className="settings-agent-picker agent-scope-note">
+          Edycja dotyczy tylko tego agenta. Globalny CRUD zasobów jest w belce po lewej.
         </div>
         <nav className="settings-tabs" aria-label="Sekcje ustawień">
           {[
@@ -924,6 +1197,272 @@ function AgentSettingsDrawer({ settings, agents, onSelectAgent, onClose, onSave 
   );
 }
 
+function GlobalResourcesDrawer({ resources, runs = [], onOpenText, onClose, onSave }) {
+  const [tab, setTab] = useState("agents");
+  const [selectedSkill, setSelectedSkill] = useState("");
+  const [skillName, setSkillName] = useState("");
+  const [skillContent, setSkillContent] = useState("");
+  const [selectedMcp, setSelectedMcp] = useState("");
+  const [mcpName, setMcpName] = useState("");
+  const [mcpCommand, setMcpCommand] = useState("");
+  const [mcpDescription, setMcpDescription] = useState("");
+  const [mcpArgs, setMcpArgs] = useState("");
+  const [mcpEnv, setMcpEnv] = useState("");
+  const [templates, setTemplates] = useState([]);
+  const [templateDraft, setTemplateDraft] = useState({ id: "", name: "", prompt: "", required_artifacts: "", quality_gates: "" });
+  const [versions, setVersions] = useState([]);
+  const [diffBase, setDiffBase] = useState("");
+  const [diffTarget, setDiffTarget] = useState("");
+  const [runDiff, setRunDiff] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const skills = resources?.skills || [];
+  const mcps = resources?.mcp || [];
+  useEffect(() => {
+    const skill = skills.find((item) => item.name === selectedSkill) || skills[0];
+    if (!skill) return;
+    setSelectedSkill(skill.name);
+    setSkillName(skill.name);
+    setSkillContent(skill.content || "");
+  }, [resources]);
+  useEffect(() => {
+    const mcp = mcps.find((item) => item.name === selectedMcp) || mcps[0];
+    if (!mcp) return;
+    setSelectedMcp(mcp.name);
+    setMcpName(mcp.name);
+    setMcpCommand(mcp.command || "");
+    setMcpDescription(mcp.description || "");
+    setMcpArgs((mcp.args || []).join("\n"));
+    setMcpEnv(Object.entries(mcp.env || {}).map(([key, value]) => `${key}=${value}`).join("\n"));
+  }, [resources]);
+  useEffect(() => {
+    if (tab === "templates") {
+      fetch("/templates.json", { cache: "no-store" }).then((item) => item.json()).then((data) => setTemplates(data.templates || []));
+    }
+    if (tab === "versions") {
+      fetch("/versions.json", { cache: "no-store" }).then((item) => item.json()).then((data) => setVersions(data.versions || []));
+    }
+  }, [tab]);
+  async function submit(payload) {
+    setSaving(true);
+    try {
+      await onSave(payload);
+    } finally {
+      setSaving(false);
+    }
+  }
+  return (
+    <div className="drawer-backdrop" role="presentation" onClick={onClose}>
+      <section className="settings-drawer global-resources-drawer" role="dialog" aria-modal="true" aria-label="Zarządzanie zasobami" onClick={(event) => event.stopPropagation()}>
+        <header>
+          <div>
+            <h2>Zarządzanie</h2>
+            <p>Globalne zasoby aplikacji</p>
+          </div>
+          <button type="button" onClick={onClose}>Zamknij</button>
+        </header>
+        <nav className="settings-tabs" aria-label="Globalne sekcje">
+          {[
+            ["agents", "Agenci", Settings],
+            ["skills", "Skille", FileText],
+            ["mcp", "MCP", Database],
+            ["templates", "Templates", ClipboardList],
+            ["versions", "Versions", History],
+            ["diff", "Diff", GitCompare]
+          ].map(([id, label, Icon]) => (
+            <button type="button" className={tab === id ? "active" : ""} onClick={() => setTab(id)} key={id}>
+              <Icon size={14} />
+              {label}
+            </button>
+          ))}
+        </nav>
+        {tab === "agents" ? (
+          <section className="resource-section">
+            <h3>Agenci</h3>
+            <div className="resource-list">
+              {(resources?.agents || []).map((agent) => (
+                <article className="resource-card" key={agent.name}>
+                  <strong>{agent.display_name || agent.name}</strong>
+                  <span>{agent.name} · {agent.effective_provider} · {agent.effective_model}</span>
+                  <small>{(agent.skills || []).length} skills · {(agent.tools || []).length} MCP/tools</small>
+                </article>
+              ))}
+            </div>
+          </section>
+        ) : null}
+        {tab === "skills" ? (
+          <section className="resource-section">
+            <div className="resource-toolbar">
+              <select value={selectedSkill} onChange={(event) => {
+                const skill = skills.find((item) => item.name === event.target.value);
+                setSelectedSkill(event.target.value);
+                setSkillName(skill?.name || "");
+                setSkillContent(skill?.content || "");
+              }}>
+                {skills.map((skill) => <option value={skill.name} key={skill.name}>{skill.name}</option>)}
+              </select>
+              <button type="button" onClick={() => { setSelectedSkill(""); setSkillName(""); setSkillContent("# Nowy skill\n"); }}>
+                <Plus size={14} /> Nowy
+              </button>
+            </div>
+            <form className="settings-edit-form" onSubmit={(event) => {
+              event.preventDefault();
+              submit({ type: "skill", action: "save", name: skillName, content: skillContent });
+            }}>
+              <label><span>Nazwa</span><input value={skillName} onChange={(event) => setSkillName(event.target.value)} /></label>
+              <textarea value={skillContent} onChange={(event) => setSkillContent(event.target.value)} rows={16} />
+              <div className="form-actions">
+                <button type="submit" disabled={saving}><Save size={14} /> Zapisz</button>
+                <button type="button" disabled={saving || !skillName} onClick={() => submit({ type: "skill", action: "delete", name: skillName })}>
+                  <Trash2 size={14} /> Usuń
+                </button>
+              </div>
+            </form>
+          </section>
+        ) : null}
+        {tab === "mcp" ? (
+          <section className="resource-section">
+            <div className="resource-toolbar">
+              <select value={selectedMcp} onChange={(event) => {
+                const mcp = mcps.find((item) => item.name === event.target.value);
+                setSelectedMcp(event.target.value);
+                setMcpName(mcp?.name || "");
+                setMcpCommand(mcp?.command || "");
+                setMcpDescription(mcp?.description || "");
+                setMcpArgs((mcp?.args || []).join("\n"));
+                setMcpEnv(Object.entries(mcp?.env || {}).map(([key, value]) => `${key}=${value}`).join("\n"));
+              }}>
+                {mcps.map((mcp) => <option value={mcp.name} key={mcp.name}>{mcp.name}</option>)}
+              </select>
+              <button type="button" onClick={() => { setSelectedMcp(""); setMcpName(""); setMcpCommand(""); setMcpDescription(""); setMcpArgs(""); setMcpEnv(""); }}>
+                <Plus size={14} /> Nowy
+              </button>
+            </div>
+            <form className="settings-edit-form" onSubmit={(event) => {
+              event.preventDefault();
+              submit({ type: "mcp", action: "save", name: mcpName, command: mcpCommand, description: mcpDescription, args: mcpArgs, env: mcpEnv });
+            }}>
+              <label><span>Nazwa</span><input value={mcpName} onChange={(event) => setMcpName(event.target.value)} /></label>
+              <label><span>Command</span><input value={mcpCommand} onChange={(event) => setMcpCommand(event.target.value)} /></label>
+              <label><span>Opis</span><textarea value={mcpDescription} onChange={(event) => setMcpDescription(event.target.value)} rows={3} /></label>
+              <label><span>Args</span><textarea value={mcpArgs} onChange={(event) => setMcpArgs(event.target.value)} rows={5} /></label>
+              <label><span>Env</span><textarea value={mcpEnv} onChange={(event) => setMcpEnv(event.target.value)} rows={5} /></label>
+              <div className="form-actions">
+                <button type="submit" disabled={saving}><Save size={14} /> Zapisz</button>
+                <button type="button" disabled={saving || !mcpName} onClick={() => submit({ type: "mcp", action: "delete", name: mcpName })}>
+                  <Trash2 size={14} /> Usuń
+                </button>
+              </div>
+            </form>
+          </section>
+        ) : null}
+        {tab === "templates" ? (
+          <section className="resource-section">
+            <h3>Task templates</h3>
+            <div className="resource-list">
+              {templates.map((template) => (
+                <button
+                  className="resource-card as-button"
+                  type="button"
+                  key={template.id}
+                  onClick={() =>
+                    setTemplateDraft({
+                      id: template.id || "",
+                      name: template.name || "",
+                      prompt: template.prompt || "",
+                      required_artifacts: (template.required_artifacts || []).join("\n"),
+                      quality_gates: (template.quality_gates || []).join("\n")
+                    })
+                  }
+                >
+                  <strong>{template.name}</strong>
+                  <span>{template.id}</span>
+                  <small>{(template.quality_gates || []).join(", ")}</small>
+                </button>
+              ))}
+            </div>
+            <form className="settings-edit-form template-form" onSubmit={async (event) => {
+              event.preventDefault();
+              setSaving(true);
+              try {
+                const response = await fetch("/templates.json", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify(templateDraft)
+                }).then((item) => item.json());
+                const data = await fetch("/templates.json", { cache: "no-store" }).then((item) => item.json());
+                setTemplates(data.templates || []);
+                if (response.template) setTemplateDraft({
+                  id: response.template.id,
+                  name: response.template.name,
+                  prompt: response.template.prompt,
+                  required_artifacts: (response.template.required_artifacts || []).join("\n"),
+                  quality_gates: (response.template.quality_gates || []).join("\n")
+                });
+              } finally {
+                setSaving(false);
+              }
+            }}>
+              <label><span>ID</span><input value={templateDraft.id} onChange={(event) => setTemplateDraft({ ...templateDraft, id: event.target.value })} /></label>
+              <label><span>Nazwa</span><input value={templateDraft.name} onChange={(event) => setTemplateDraft({ ...templateDraft, name: event.target.value })} /></label>
+              <label><span>Prompt</span><textarea rows={5} value={templateDraft.prompt} onChange={(event) => setTemplateDraft({ ...templateDraft, prompt: event.target.value })} /></label>
+              <label><span>Artefakty</span><textarea rows={4} value={templateDraft.required_artifacts} onChange={(event) => setTemplateDraft({ ...templateDraft, required_artifacts: event.target.value })} /></label>
+              <label><span>Gate'y</span><textarea rows={4} value={templateDraft.quality_gates} onChange={(event) => setTemplateDraft({ ...templateDraft, quality_gates: event.target.value })} /></label>
+              <button type="submit" disabled={saving}><Save size={14} /> Zapisz template</button>
+            </form>
+          </section>
+        ) : null}
+        {tab === "versions" ? (
+          <section className="resource-section">
+            <h3>Prompt / Skill versions</h3>
+            <div className="resource-list">
+              {versions.length ? versions.map((version) => (
+                <button
+                  className="resource-card as-button"
+                  type="button"
+                  key={version.id}
+                  onClick={() => onOpenText?.({ title: `${version.resource} · ${version.created_at}`, text: version.content || "" })}
+                >
+                  <strong>{version.resource}</strong>
+                  <span>{version.reason} · {version.created_at}</span>
+                  <small>{version.id}</small>
+                </button>
+              )) : <p className="muted">Brak wersji promptów/skilli.</p>}
+            </div>
+          </section>
+        ) : null}
+        {tab === "diff" ? (
+          <section className="resource-section">
+            <h3>Run diff</h3>
+            <form className="settings-edit-form" onSubmit={async (event) => {
+              event.preventDefault();
+              const data = await fetch(`/run-diff.json?base=${encodeURIComponent(diffBase)}&target=${encodeURIComponent(diffTarget)}`, { cache: "no-store" }).then((item) => item.json());
+              setRunDiff(data);
+            }}>
+              <label><span>Base run</span><select value={diffBase} onChange={(event) => setDiffBase(event.target.value)}>
+                <option value="">wybierz</option>
+                {runs.map((run) => <option key={run.run_id} value={run.run_id}>{run.run_id} · {run.status}</option>)}
+              </select></label>
+              <label><span>Target run</span><select value={diffTarget} onChange={(event) => setDiffTarget(event.target.value)}>
+                <option value="">wybierz</option>
+                {runs.map((run) => <option key={run.run_id} value={run.run_id}>{run.run_id} · {run.status}</option>)}
+              </select></label>
+              <button type="submit"><GitCompare size={14} /> Porównaj</button>
+            </form>
+            {runDiff ? (
+              <div className="diff-grid">
+                <KeyValue label="Score Δ" value={runDiff.score_delta ?? "-"} />
+                <KeyValue label="Token Δ" value={runDiff.token_delta ?? "-"} />
+                <KeyValue label="Artefakty Δ" value={runDiff.artifact_delta ?? "-"} />
+                <KeyValue label="Status changed" value={runDiff.status_changed ? "tak" : "nie"} />
+              </div>
+            ) : null}
+          </section>
+        ) : null}
+      </section>
+    </div>
+  );
+}
+
 function TagList({ values, empty }) {
   return values.length ? (
     <div className="tag-list">
@@ -1039,11 +1578,6 @@ function formatNumber(value) {
   return new Intl.NumberFormat("pl-PL").format(Number(value || 0));
 }
 
-function compactOption(value) {
-  const text = String(value || "").replace(/\s+/g, " ").trim();
-  return text.length > 42 ? `${text.slice(0, 42)}...` : text;
-}
-
 function displayAgentName(agent) {
   if (!agent) return "-";
   const names = {
@@ -1063,7 +1597,7 @@ function displayAgentName(agent) {
   return agent.display_name || names[agent.name] || String(agent.name || "").replace(/_/g, " ");
 }
 
-function buildRunFlow(events, rooms, mode = "desktop", size = { width: 1000, height: 850 }, selected, onSelect) {
+function buildRunFlow(events, rooms, mode = "desktop", size = { width: 1000, height: 850 }, selected, onSelect, activeStep = null, flowSteps = null) {
   const eventStatuses = {};
   for (const event of events || []) {
     const role = roleFromEvent(event);
@@ -1074,28 +1608,10 @@ function buildRunFlow(events, rooms, mode = "desktop", size = { width: 1000, hei
     acc[agent.role] = combineFlowStatus(acc[agent.role], normalizeFlowStatus(agent.status));
     return acc;
   }, eventStatuses);
-  const sequence = [];
-  let previousRole = null;
-  for (const event of events || []) {
-    const role = roleFromEvent(event);
-    if (!role) continue;
-    if (previousRole !== role) sequence.push(role);
-    previousRole = role;
-  }
-  const transitions = [];
-  if (sequence.length) {
-    transitions.push({ source: "start", target: sequence[0], status: agentStatuses[sequence[0]] || "running" });
-    for (let index = 1; index < sequence.length; index += 1) {
-      transitions.push({ source: sequence[index - 1], target: sequence[index], status: agentStatuses[sequence[index]] || "running" });
-    }
-    transitions.push({ source: sequence[sequence.length - 1], target: "end", status: agentStatuses[sequence[sequence.length - 1]] || "completed" });
-  }
-  const firstRole = sequence[0] || "main";
-  const lastRole = sequence[sequence.length - 1] || firstRole;
-  const latestByPair = new Map();
-  transitions.forEach((transition, index) => {
-    latestByPair.set(`${transition.source}->${transition.target}`, { ...transition, index });
-  });
+  const steps = flowSteps || buildFlowSteps(events);
+  const visibleSteps = activeStep ? steps.filter((step) => step.index <= activeStep) : steps;
+  const firstRole = steps[0]?.target || "main";
+  const lastRole = visibleSteps[visibleSteps.length - 1]?.target || steps[steps.length - 1]?.target || firstRole;
   const nodes = ["start", ...ROOMS.map((room) => room.role), "end"].map((role) => {
     const point = flowPoint(role, mode);
     const room = (rooms || []).find((item) => item.role === role) || ROOMS.find((item) => item.role === role);
@@ -1125,30 +1641,34 @@ function buildRunFlow(events, rooms, mode = "desktop", size = { width: 1000, hei
       selectable: false
     };
   });
-  const transitionList = Array.from(latestByPair.values());
-  const edges = transitionList.map((transition) => ({
-    id: `${transition.source}-${transition.target}-${transition.index}`,
-    source: transition.source,
-    target: transition.target,
-    label: transitionLabel(transition),
-    type: "smoothstep",
-    animated: normalizeFlowStatus(transition.status) === "running",
-    className: `flow-rf-edge ${normalizeFlowStatus(transition.status)}`,
-    markerEnd: { type: MarkerType.ArrowClosed, color: flowColor(transition.status) },
-    style: {
-      stroke: flowColor(transition.status),
-      strokeWidth: 3,
-      strokeDasharray: normalizeFlowStatus(transition.status) === "completed" ? "8 6" : normalizeFlowStatus(transition.status) === "running" ? "4 5" : "0"
-    },
-    labelStyle: { fill: flowColor(transition.status), fontWeight: 800, fontSize: 11 },
-    labelBgStyle: { fill: "rgba(248,250,252,0.92)" },
-    labelBgPadding: [5, 3],
-    labelBgBorderRadius: 5
-  }));
+  const edges = visibleSteps.map((transition) => {
+    const status = normalizeFlowStatus(transition.status);
+    const isActiveStep = transition.index === activeStep;
+    const color = isActiveStep ? "#d6a400" : flowColor(status, transition.index - 1, visibleSteps.length);
+    return {
+      id: `${transition.source}-${transition.target}-${transition.index}`,
+      source: transition.source,
+      target: transition.target,
+      label: transitionLabel(transition),
+      type: "smoothstep",
+      animated: status === "running",
+      className: `flow-rf-edge ${status} ${isActiveStep ? "active-step" : ""}`,
+      markerEnd: { type: MarkerType.ArrowClosed, color },
+      style: {
+        stroke: color,
+        strokeWidth: isActiveStep ? 4.5 : 3.5,
+        strokeDasharray: status === "completed" ? "10 7" : status === "running" ? "4 5" : "0"
+      },
+      labelStyle: { fill: color, fontWeight: 800, fontSize: 11 },
+      labelBgStyle: { fill: "rgba(248,250,252,0.92)" },
+      labelBgPadding: [5, 3],
+      labelBgBorderRadius: 5
+    };
+  });
   return {
     nodes,
     edges,
-    key: `${mode}-${size.width}-${size.height}-${sequence.join("-")}-${edges.map((edge) => `${edge.source}:${edge.target}:${edge.className}`).join("|")}`,
+    key: `${mode}-${size.width}-${size.height}-${activeStep}-${steps.map((step) => `${step.source}:${step.target}:${step.status}`).join("|")}`,
   };
 }
 
@@ -1204,26 +1724,6 @@ function flowPoint(role, mode) {
   return points[role] || desktop.main;
 }
 
-function roleFromEvent(event) {
-  const name = String(event?.event || "").toLowerCase();
-  if (!name.startsWith("agent.")) return null;
-  if (name.includes("analyst")) return "analyst";
-  if (name.includes("research")) return "researcher";
-  if (name.includes("build") || name.includes("builder")) return "builder";
-  if (name.includes("review")) return "reviewer";
-  if (name.includes("learner") || name.includes("learning")) return "learner";
-  if (name.includes("supervisor")) return "supervisor";
-  if (name.includes("main") || name.includes("final")) return "main";
-  return null;
-}
-
-function flowStatusFromEvent(event) {
-  const name = String(event?.event || "").toLowerCase();
-  if (name.includes("failed") || name.includes("error")) return "failed";
-  if (name.includes("started") || name.includes("running")) return "running";
-  return "completed";
-}
-
 function normalizeFlowStatus(status) {
   const value = String(status || "").toLowerCase();
   if (value.includes("failed") || value.includes("error")) return "failed";
@@ -1239,16 +1739,16 @@ function combineFlowStatus(current, next) {
   return current || next || "idle";
 }
 
-function flowColor(status) {
+function flowColor(status, index = 0, total = 1) {
   if (status === "failed") return "#c8322b";
   if (status === "running") return "#111923";
-  return "#2f9d58";
+  return greenShade(index, total);
 }
 
 function transitionLabel(transition) {
   if (transition.status === "failed") return "błąd";
   if (transition.status === "running") return "w trakcie";
-  return "wykonano";
+  return `${transition.index}. wykonano`;
 }
 
 createRoot(document.getElementById("root")).render(<App />);

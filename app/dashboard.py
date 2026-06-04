@@ -67,6 +67,21 @@ def serve_dashboard(project_root: Path, config_path: Path, host: str = "127.0.0.
                 agent_name = params.get("agent", [""])[0]
                 self._send_json({"agent": read_agent_settings(project_root, config, agent_name)})
                 return
+            if parsed.path == "/resources.json":
+                self._send_json(read_global_resources(project_root, config))
+                return
+            if parsed.path == "/templates.json":
+                self._send_json(read_task_templates(project_root))
+                return
+            if parsed.path == "/versions.json":
+                self._send_json({"versions": read_prompt_versions(project_root)})
+                return
+            if parsed.path == "/run-diff.json":
+                params = parse_qs(parsed.query)
+                base = params.get("base", [""])[0]
+                target = params.get("target", [""])[0]
+                self._send_json(read_run_diff(artifact_root, base, target))
+                return
             if parsed.path == "/events.json":
                 params = parse_qs(parsed.query)
                 run_id = params.get("run_id", [None])[0] or latest_run_id(artifact_root)
@@ -92,15 +107,39 @@ def serve_dashboard(project_root: Path, config_path: Path, host: str = "127.0.0.
             self.send_error(404)
 
         def do_POST(self) -> None:
+            nonlocal config
             parsed = urlparse(self.path)
             if parsed.path == "/agent-settings.json":
                 payload = self._read_json_body()
                 result = update_agent_runtime_settings(config_path, payload)
                 if result.get("updated"):
-                    nonlocal config
                     config = load_config(config_path)
                     agent_name = str(payload.get("agent") or "")
                     result["agent"] = read_agent_settings(project_root, config, agent_name)
+                self._send_json(result)
+                return
+            if parsed.path == "/resources.json":
+                payload = self._read_json_body()
+                result = update_global_resource(project_root, config_path, payload)
+                if result.get("updated"):
+                    config = load_config(config_path)
+                self._send_json(result)
+                return
+            if parsed.path == "/learning/improve":
+                payload = self._read_json_body()
+                result = prepare_learning_improvement(project_root, artifact_root, str(payload.get("run_id") or ""))
+                self._send_json(result)
+                return
+            if parsed.path == "/learning/apply":
+                payload = self._read_json_body()
+                result = apply_learning_actions(project_root, config_path, payload)
+                if result.get("updated"):
+                    config = load_config(config_path)
+                self._send_json(result)
+                return
+            if parsed.path == "/templates.json":
+                payload = self._read_json_body()
+                result = update_task_template(project_root, payload)
                 self._send_json(result)
                 return
             if parsed.path in {"/checkpoint/resume", "/checkpoint/restart"}:
@@ -378,6 +417,8 @@ def update_agent_runtime_settings(config_path: Path, payload: dict[str, object])
         root = config_path.parent.parent.resolve()
         if root not in path.parents and path != root:
             return {"updated": False, "message": "Niepoprawna ścieżka promptu."}
+        if path.exists():
+            record_resource_version(root, str(Path(str(prompt_path)).as_posix()), path.read_text(encoding="utf-8"), "agent_prompt_update")
         path.write_text(str(payload.get("prompt") or ""), encoding="utf-8")
 
     config_path.write_text(yaml.safe_dump(raw, sort_keys=False, allow_unicode=False), encoding="utf-8")
@@ -385,10 +426,489 @@ def update_agent_runtime_settings(config_path: Path, payload: dict[str, object])
     return {"updated": True, "message": "Ustawienia agenta zapisane."}
 
 
+def read_global_resources(project_root: Path, config: object) -> dict[str, object]:
+    skill_root = project_root / "skills"
+    skills = []
+    if skill_root.exists():
+        for path in sorted(skill_root.glob("*.md")):
+            skills.append(
+                {
+                    "name": path.stem,
+                    "path": str(path.relative_to(project_root)),
+                    "content": path.read_text(encoding="utf-8", errors="replace"),
+                    "agents": _agents_using_skill(config, path.stem),
+                }
+            )
+    return {
+        "agents": [read_agent_settings(project_root, config, name) for name in sorted(getattr(config, "agents", {}))],
+        "skills": skills,
+        "mcp": read_mcp_resources(project_root),
+    }
+
+
+def update_global_resource(project_root: Path, config_path: Path, payload: dict[str, object]) -> dict[str, object]:
+    resource_type = str(payload.get("type") or "").strip().lower()
+    action = str(payload.get("action") or "save").strip().lower()
+    name = _resource_name(str(payload.get("name") or ""))
+    if resource_type == "skill":
+        result = update_skill_resource(project_root, name, str(payload.get("content") or ""), action)
+        if result.get("updated"):
+            _sync_removed_list_references(config_path, "skills", result.get("removed_name"))
+        return result
+    if resource_type == "mcp":
+        result = update_mcp_resource(project_root, name, payload, action)
+        if result.get("updated"):
+            _sync_removed_list_references(config_path, "tools", result.get("removed_name"))
+        return result
+    return {"updated": False, "message": "Nieobsługiwany typ zasobu."}
+
+
+def update_skill_resource(project_root: Path, name: str, content: str, action: str) -> dict[str, object]:
+    if not name:
+        return {"updated": False, "message": "Podaj nazwę skilla."}
+    path = _resource_path(project_root / "skills", f"{name}.md")
+    if action == "delete":
+        if path.exists():
+            record_resource_version(project_root, str(path.relative_to(project_root).as_posix()), path.read_text(encoding="utf-8"), "skill_delete")
+            path.unlink()
+        return {"updated": True, "message": f"Skill {name} usunięty.", "removed_name": name}
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if path.exists():
+        record_resource_version(project_root, str(path.relative_to(project_root).as_posix()), path.read_text(encoding="utf-8"), "skill_update")
+    else:
+        record_resource_version(project_root, str(path.relative_to(project_root).as_posix()), "", "skill_create")
+    path.write_text(content.strip() + "\n", encoding="utf-8")
+    return {"updated": True, "message": f"Skill {name} zapisany.", "resource": {"name": name, "path": str(path)}}
+
+
+def read_mcp_resources(project_root: Path) -> list[dict[str, object]]:
+    path = project_root / "workspace" / "mcp_resources.json"
+    if not path.exists():
+        return []
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return []
+    return value if isinstance(value, list) else []
+
+
+def update_mcp_resource(project_root: Path, name: str, payload: dict[str, object], action: str) -> dict[str, object]:
+    if not name:
+        return {"updated": False, "message": "Podaj nazwę MCP."}
+    path = project_root / "workspace" / "mcp_resources.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    resources = [item for item in read_mcp_resources(project_root) if isinstance(item, dict)]
+    if action == "delete":
+        resources = [item for item in resources if item.get("name") != name]
+        path.write_text(json.dumps(resources, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
+        return {"updated": True, "message": f"MCP {name} usunięty.", "removed_name": name}
+
+    next_resource = {
+        "name": name,
+        "command": str(payload.get("command") or ""),
+        "description": str(payload.get("description") or ""),
+        "args": _string_list(payload.get("args")),
+        "env": _parse_env_lines(payload.get("env")),
+    }
+    resources = [item for item in resources if item.get("name") != name]
+    resources.append(next_resource)
+    resources.sort(key=lambda item: str(item.get("name", "")))
+    path.write_text(json.dumps(resources, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
+    return {"updated": True, "message": f"MCP {name} zapisany.", "resource": next_resource}
+
+
+def prepare_learning_improvement(project_root: Path, artifact_root: Path, run_id: str) -> dict[str, object]:
+    status = read_status(artifact_root, run_id) if run_id else read_latest_status(artifact_root)
+    if not status.get("run_id"):
+        return {"accepted": False, "message": "Nie znaleziono runu do poprawy."}
+    learning = _read_run_artifact_text(status, "self_learner") or _read_named_artifact(status, "learning.md")
+    final_answer = _read_run_artifact_text(status, "main") or str(status.get("final_answer") or "")
+    if not learning:
+        return {"accepted": False, "message": "Ten run nie ma jeszcze learning.md."}
+    prompt = build_learning_improvement_prompt(status, learning, final_answer)
+    action = append_checkpoint_action(
+        project_root / "workspace" / "learning_improvements.jsonl",
+        "learning_improve_prepared",
+        {"run_id": status["run_id"]},
+    )
+    artifact_path = write_learning_improvement_artifact(project_root, action["id"], status, prompt)
+    return {
+        "accepted": True,
+        "message": f"Plan poprawy według learningu przygotowany dla runu {status['run_id']}. Nie uruchomiono nowego runu.",
+        "source_run_id": status["run_id"],
+        "action_id": action["id"],
+        "artifact_path": str(artifact_path),
+    }
+
+
+def write_learning_improvement_artifact(project_root: Path, action_id: object, status: dict[str, object], prompt: str) -> Path:
+    output_dir = project_root / "workspace" / "learning_improvements"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    path = output_dir / f"{action_id}.md"
+    body = (
+        "# Plan poprawy wedlug learningu\n\n"
+        f"- Source run: `{status.get('run_id')}`\n"
+        "- Status: prepared\n"
+        "- Auto-run: disabled\n\n"
+        "Ten plik jest przygotowanym kontraktem poprawy. Nie uruchamia automatycznie kolejnego swarm runu.\n\n"
+        "## Kontrakt poprawy\n\n"
+        f"{prompt}\n"
+    )
+    path.write_text(body, encoding="utf-8")
+    return path
+
+
+def apply_learning_actions(project_root: Path, config_path: Path, payload: dict[str, object]) -> dict[str, object]:
+    actions = payload.get("actions")
+    if not isinstance(actions, list) or not actions:
+        return {"updated": False, "message": "Brak zaznaczonych akcji learningu."}
+    applied = []
+    errors = []
+    for action in actions:
+        if not isinstance(action, dict):
+            continue
+        action_type = str(action.get("type") or "")
+        target = str(action.get("target") or "").strip()
+        content = str(action.get("content") or "").strip()
+        try:
+            if action_type == "prompt_append":
+                applied.append(_apply_prompt_append(project_root, config_path, target, content))
+            elif action_type == "skill_create":
+                applied.append(_apply_skill_create(project_root, config_path, target, content))
+            elif action_type == "agent_skill_add":
+                applied.append(_apply_agent_skill_add(config_path, target, content))
+            else:
+                errors.append(f"Nieobsługiwana akcja: {action_type}")
+        except (OSError, ValueError) as exc:
+            errors.append(str(exc))
+    return {
+        "updated": bool(applied),
+        "message": f"Zastosowano {len(applied)} akcji learningu." if applied else "Nie zastosowano akcji learningu.",
+        "applied": applied,
+        "errors": errors,
+    }
+
+
+def read_prompt_versions(project_root: Path) -> list[dict[str, object]]:
+    path = project_root / "workspace" / "resource_versions.jsonl"
+    if not path.exists():
+        return []
+    versions = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        try:
+            item = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(item, dict):
+            versions.append(item)
+    return list(reversed(versions))
+
+
+def record_resource_version(project_root: Path, resource: str, content: str, reason: str) -> dict[str, object]:
+    path = project_root / "workspace" / "resource_versions.jsonl"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    record = {
+        "id": _timestamp_id(),
+        "resource": resource.replace("\\", "/"),
+        "reason": reason,
+        "created_at": _timestamp(),
+        "content": content,
+    }
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(record, ensure_ascii=True) + "\n")
+    return record
+
+
+def read_run_diff(artifact_root: Path, base_run_id: str, target_run_id: str) -> dict[str, object]:
+    base = read_status(artifact_root, base_run_id)
+    target = read_status(artifact_root, target_run_id)
+    base_score = _learning_score(base)
+    target_score = _learning_score(target)
+    base_tokens = _int_value_from_dict(base.get("token_usage"), "total_tokens")
+    target_tokens = _int_value_from_dict(target.get("token_usage"), "total_tokens")
+    return {
+        "runs": {
+            "base": _run_diff_summary(base),
+            "target": _run_diff_summary(target),
+        },
+        "score_delta": (target_score - base_score) if base_score is not None and target_score is not None else None,
+        "token_delta": target_tokens - base_tokens,
+        "artifact_delta": _artifact_count(target) - _artifact_count(base),
+        "status_changed": base.get("status") != target.get("status"),
+    }
+
+
+def read_task_templates(project_root: Path) -> dict[str, object]:
+    path = project_root / "workspace" / "task_templates.json"
+    if path.exists():
+        try:
+            value = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(value, dict) and isinstance(value.get("templates"), list):
+                return value
+        except json.JSONDecodeError:
+            pass
+    return {"templates": default_task_templates()}
+
+
+def update_task_template(project_root: Path, payload: dict[str, object]) -> dict[str, object]:
+    template_id = _resource_name(str(payload.get("id") or payload.get("name") or ""))
+    if not template_id:
+        return {"updated": False, "message": "Podaj id template."}
+    templates = read_task_templates(project_root)["templates"]
+    next_template = {
+        "id": template_id,
+        "name": str(payload.get("name") or template_id.replace("_", " ").title()),
+        "prompt": str(payload.get("prompt") or ""),
+        "required_artifacts": _string_list(payload.get("required_artifacts")),
+        "quality_gates": _string_list(payload.get("quality_gates")),
+    }
+    templates = [template for template in templates if not isinstance(template, dict) or template.get("id") != template_id]
+    templates.append(next_template)
+    templates.sort(key=lambda item: str(item.get("id", "")))
+    path = project_root / "workspace" / "task_templates.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"templates": templates}, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
+    return {"updated": True, "message": f"Template {template_id} zapisany.", "template": next_template}
+
+
+def build_learning_improvement_prompt(status: dict[str, object], learning: str, final_answer: str) -> str:
+    learning_focus = _extract_learning_focus(learning)
+    final_excerpt = _clip_middle(final_answer, 3200)
+    return (
+        "Uruchom refinement istniejącego runu multi-agent swarm wyłącznie na podstawie poniższej oceny self-learning.\n\n"
+        "Cel: popraw finalny artefakt i handoffy zgodnie z sugestiami learning agent. Nie zmieniaj automatycznie globalnych promptów ani konfiguracji agentów. "
+        "Jeżeli proponujesz zmiany konfiguracji, wypisz je jako rekomendacje w markdown.\n\n"
+        f"Source run: {status.get('run_id')}\n"
+        f"Oryginalny request użytkownika:\n{status.get('user_input') or '-'}\n\n"
+        f"Skrót obecnego finalnego wyniku:\n{final_excerpt or '-'}\n\n"
+        f"Najważniejsze sugestie self-learning:\n{learning_focus or _clip_middle(learning, 4200)}\n\n"
+        "Wynik ma być kompletnym poprawionym markdownem oraz zawierać krótką sekcję 'Co poprawiono według learningu'."
+    )
+
+
 def _string_list(value: object) -> list[str]:
     if isinstance(value, list):
         return [str(item).strip() for item in value if str(item).strip()]
     return [item.strip() for item in str(value or "").replace("\n", ",").split(",") if item.strip()]
+
+
+def _apply_prompt_append(project_root: Path, config_path: Path, agent_name: str, content: str) -> str:
+    if not agent_name or not content:
+        raise ValueError("Akcja prompt_append wymaga target i content.")
+    raw = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+    agent = (raw.get("agents") or {}).get(agent_name)
+    if not isinstance(agent, dict) or not agent.get("prompt"):
+        raise ValueError(f"Nie znaleziono promptu agenta {agent_name}.")
+    prompt_path = Path(str(agent["prompt"]))
+    path = (project_root / prompt_path).resolve()
+    root = project_root.resolve()
+    if root not in path.parents and path != root:
+        raise ValueError("Niepoprawna ścieżka promptu.")
+    previous = path.read_text(encoding="utf-8") if path.exists() else ""
+    record_resource_version(project_root, prompt_path.as_posix(), previous, "learning_prompt_append")
+    path.write_text(previous.rstrip() + "\n\n## Learning improvement\n" + content.strip() + "\n", encoding="utf-8")
+    return f"prompt:{agent_name}"
+
+
+def _apply_skill_create(project_root: Path, config_path: Path, skill_name: str, content: str) -> str:
+    result = update_skill_resource(project_root, _resource_name(skill_name), content or f"# {skill_name}", "save")
+    if not result.get("updated"):
+        raise ValueError(str(result.get("message") or "Nie zapisano skilla."))
+    return f"skill:{skill_name}"
+
+
+def _apply_agent_skill_add(config_path: Path, agent_name: str, skill_name: str) -> str:
+    if not agent_name or not skill_name:
+        raise ValueError("Akcja agent_skill_add wymaga target i content.")
+    raw = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+    agents = raw.get("agents")
+    if not isinstance(agents, dict) or agent_name not in agents:
+        raise ValueError(f"Nie znaleziono agenta {agent_name}.")
+    agent = agents[agent_name]
+    skills = agent.setdefault("skills", [])
+    if skill_name not in skills:
+        skills.append(skill_name)
+    config_path.write_text(yaml.safe_dump(raw, sort_keys=False, allow_unicode=False), encoding="utf-8")
+    return f"agent-skill:{agent_name}:{skill_name}"
+
+
+def _learning_score(status: dict[str, object]) -> int | None:
+    text = _read_run_artifact_text(status, "self_learner") or _read_named_artifact(status, "learning.md")
+    if not text:
+        return None
+    import re
+
+    match = re.search(r"score:\s*([0-9]{1,3})\s*/\s*100|Run Quality Score:\s*([0-9]{1,3})\s*/\s*100", text, flags=re.IGNORECASE)
+    if not match:
+        return None
+    value = match.group(1) or match.group(2)
+    return int(value)
+
+
+def _run_diff_summary(status: dict[str, object]) -> dict[str, object]:
+    return {
+        "run_id": status.get("run_id"),
+        "status": status.get("status"),
+        "score": _learning_score(status),
+        "tokens": _int_value_from_dict(status.get("token_usage"), "total_tokens"),
+        "artifacts": _artifact_count(status),
+        "final_len": len(str(status.get("final_answer") or "")),
+    }
+
+
+def _artifact_count(status: dict[str, object]) -> int:
+    artifacts = status.get("artifacts")
+    return len(artifacts) if isinstance(artifacts, list) else 0
+
+
+def _int_value_from_dict(value: object, key: str) -> int:
+    if not isinstance(value, dict):
+        return 0
+    try:
+        return int(value.get(key) or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def default_task_templates() -> list[dict[str, object]]:
+    return [
+        {
+            "id": "app_spec",
+            "name": "Specyfikacja aplikacji",
+            "prompt": "Przygotuj kompletną specyfikację aplikacji w Markdown z TDD/BDD.",
+            "required_artifacts": ["builder.md", "final.md", "learning.md"],
+            "quality_gates": ["builder_completeness", "review", "learning"],
+        },
+        {
+            "id": "code_feature",
+            "name": "Implementacja feature",
+            "prompt": "Zaimplementuj feature w kodzie, dodaj testy i zweryfikuj build.",
+            "required_artifacts": ["builder.md", "review.md", "final.md"],
+            "quality_gates": ["tdd", "review", "tests"],
+        },
+        {
+            "id": "debug",
+            "name": "Debug / naprawa błędu",
+            "prompt": "Znajdź root cause, napisz test reprodukujący błąd i napraw problem.",
+            "required_artifacts": ["researcher.md", "builder.md", "final.md"],
+            "quality_gates": ["root_cause", "regression_test", "review"],
+        },
+    ]
+
+
+def _resource_name(value: str) -> str:
+    return "".join(char for char in value.strip().lower().replace(" ", "_") if char.isalnum() or char in {"_", "-"})
+
+
+def _resource_path(root: Path, filename: str) -> Path:
+    root = root.resolve()
+    path = (root / filename).resolve()
+    if root not in path.parents and path != root:
+        raise ValueError("Niepoprawna ścieżka zasobu.")
+    return path
+
+
+def _parse_env_lines(value: object) -> dict[str, str]:
+    if isinstance(value, dict):
+        return {str(key): str(item) for key, item in value.items() if str(key).strip()}
+    env: dict[str, str] = {}
+    for line in str(value or "").splitlines():
+        if not line.strip() or "=" not in line:
+            continue
+        key, item = line.split("=", 1)
+        key = key.strip()
+        if key:
+            env[key] = item.strip()
+    return env
+
+
+def _agents_using_skill(config: object, skill_name: str) -> list[str]:
+    agents = getattr(config, "agents", {})
+    if not isinstance(agents, dict):
+        return []
+    return sorted(name for name, agent in agents.items() if skill_name in getattr(agent, "skills", []))
+
+
+def _sync_removed_list_references(config_path: Path, key: str, removed_name: object) -> None:
+    if not removed_name:
+        return
+    raw = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+    agents = raw.get("agents")
+    if not isinstance(agents, dict):
+        return
+    changed = False
+    for agent in agents.values():
+        if not isinstance(agent, dict) or not isinstance(agent.get(key), list):
+            continue
+        next_items = [item for item in agent[key] if item != removed_name]
+        if next_items != agent[key]:
+            agent[key] = next_items
+            changed = True
+    if changed:
+        config_path.write_text(yaml.safe_dump(raw, sort_keys=False, allow_unicode=False), encoding="utf-8")
+
+
+def _read_run_artifact_text(status: dict[str, object], agent_name: str) -> str:
+    artifacts = status.get("artifacts")
+    if not isinstance(artifacts, list):
+        return ""
+    for artifact in reversed(artifacts):
+        if isinstance(artifact, dict) and artifact.get("agent") == agent_name:
+            return _safe_artifact_text(artifact.get("artifact_path"))
+    return ""
+
+
+def _read_named_artifact(status: dict[str, object], filename: str) -> str:
+    run_path = status.get("path")
+    if not run_path:
+        return ""
+    return _safe_artifact_text(Path(str(run_path)) / filename)
+
+
+def _safe_artifact_text(path_value: object) -> str:
+    if not path_value:
+        return ""
+    try:
+        path = Path(str(path_value)).resolve()
+    except OSError:
+        return ""
+    if not path.exists() or not path.is_file():
+        return ""
+    return path.read_text(encoding="utf-8", errors="replace")
+
+
+def _clip_middle(text: str, limit: int) -> str:
+    value = str(text or "").strip()
+    if len(value) <= limit:
+        return value
+    head = max(0, limit // 2)
+    tail = max(0, limit - head)
+    return value[:head].rstrip() + "\n\n...[skrócono długi kontekst]...\n\n" + value[-tail:].lstrip()
+
+
+def _extract_learning_focus(learning: str) -> str:
+    wanted = [
+        "Recommended Prompt / Skill / Config Changes",
+        "Next-Run Guardrails",
+        "Flow / Handoff Issues",
+        "Reusable Lessons",
+    ]
+    sections = []
+    lines = str(learning or "").splitlines()
+    current: list[str] = []
+    keep = False
+    for line in lines:
+        is_heading = line.startswith("**") and line.endswith("**")
+        if is_heading:
+            if keep and current:
+                sections.append("\n".join(current).strip())
+            keep = any(name in line for name in wanted)
+            current = [line] if keep else []
+        elif keep:
+            current.append(line)
+    if keep and current:
+        sections.append("\n".join(current).strip())
+    return _clip_middle("\n\n".join(item for item in sections if item), 5200)
 
 
 def model_options_for_provider(provider: str) -> list[str]:
@@ -559,9 +1079,41 @@ def start_checkpoint_run(project_root: Path, config_path: Path, prompt: str, act
                     )
                     + "\n"
                 )
+            mark_latest_background_failure(project_root, config_path, str(exc))
 
     thread = threading.Thread(target=worker, name=f"checkpoint-action-{action_id}", daemon=True)
     thread.start()
+
+
+def mark_latest_background_failure(project_root: Path, config_path: Path, error: str) -> None:
+    try:
+        config = load_config(config_path)
+        artifact_root = project_root / config.artifact_root
+        latest_path = artifact_root / "latest.json"
+        if not latest_path.exists():
+            return
+        status = json.loads(latest_path.read_text(encoding="utf-8"))
+        if not isinstance(status, dict) or status.get("status") != "running" or not status.get("run_id"):
+            return
+        now = _timestamp()
+        status["status"] = "failed"
+        status["updated_at"] = now
+        status["finished_at"] = now
+        status.setdefault("errors", []).append({"message": error, "at": now})
+        agents = status.get("agents")
+        if isinstance(agents, dict):
+            main = agents.get("main")
+            if isinstance(main, dict) and main.get("status") in {"idle", "running"}:
+                main["status"] = "failed"
+                main["finished_at"] = now
+                main["error"] = error
+                main["summary"] = "Background run failed before agent execution."
+        body = json.dumps(status, ensure_ascii=True, indent=2) + "\n"
+        run_path = artifact_root / str(status["run_id"]) / "status.json"
+        run_path.write_text(body, encoding="utf-8")
+        latest_path.write_text(body, encoding="utf-8")
+    except Exception:
+        return
 
 
 def _timestamp_id() -> str:
