@@ -41,6 +41,7 @@ def build_graph(
     graph.add_node("build_solution", nodes.build_solution)
     graph.add_node("review_panel", nodes.review_panel)
     graph.add_node("supervisor_gate", nodes.supervisor_gate)
+    graph.add_node("self_learning", nodes.self_learning)
     graph.add_node("final_response", nodes.final_response)
 
     graph.add_edge(START, "main_decision")
@@ -62,9 +63,10 @@ def build_graph(
         lambda state: should_retry_review(state, config.max_review_retries),
         {
             "retry": "analyst_panel",
-            "final": "final_response",
+            "final": "self_learning",
         },
     )
+    graph.add_edge("self_learning", "final_response")
     graph.add_edge("final_response", END)
 
     return graph.compile()

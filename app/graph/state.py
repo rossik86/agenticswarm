@@ -15,6 +15,7 @@ class AgentState(TypedDict, total=False):
     build_result: dict[str, Any] | None
     quality_result: dict[str, Any] | None
     supervisor_gate: dict[str, Any] | None
+    learning_result: dict[str, Any] | None
     plan: dict[str, Any] | None
     selected_agents: list[str]
     tasks: list[dict[str, Any]]

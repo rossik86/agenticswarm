@@ -70,6 +70,7 @@ agents:
       - researcher
       - builder
       - reviewer
+      - self_learner
 
   analyst_neutral:
     type: specialist
@@ -213,3 +214,26 @@ agents:
     output_artifact: review_positive.md
     validates:
       - builder
+
+  self_learner:
+    type: specialist
+    display_name: Self-Learning Quality Optimizer
+    description: Evaluator-optimizer agent. Reviews the whole run, every agent, room handoffs, and records reusable lessons to improve future runs.
+    skills:
+      - reflection
+      - evaluator_optimizer
+      - flow_improvement
+      - quality_control
+    model: gpt-5.4-mini
+    temperature: 0.1
+    prompt: prompts/self_learner.md
+    tools:
+      - markdown_writer
+    output_artifact: learning.md
+    validates:
+      - main
+      - supervisor
+      - researcher
+      - analyst_neutral
+      - builder
+      - reviewer

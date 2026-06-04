@@ -338,32 +338,57 @@ def update_agent_runtime_settings(config_path: Path, payload: dict[str, object])
     if not isinstance(agent, dict):
         return {"updated": False, "message": "Niepoprawna konfiguracja agenta."}
 
-    provider_value = payload.get("provider")
-    if provider_value in {"", None, "default"}:
-        agent.pop("provider", None)
-    elif provider_value in {"agents_sdk", "codex_cli", "openhands"}:
-        agent["provider"] = str(provider_value)
-    else:
-        return {"updated": False, "message": "Nieobsługiwany provider."}
+    if "provider" in payload:
+        provider_value = payload.get("provider")
+        if provider_value in {"", None, "default"}:
+            agent.pop("provider", None)
+        elif provider_value in {"agents_sdk", "codex_cli", "openhands"}:
+            agent["provider"] = str(provider_value)
+        else:
+            return {"updated": False, "message": "Nieobsługiwany provider."}
 
-    model_value = str(payload.get("model") or "").strip()
-    if model_value:
-        agent["model"] = model_value
-    else:
-        agent.pop("model", None)
+    if "model" in payload:
+        model_value = str(payload.get("model") or "").strip()
+        if model_value:
+            agent["model"] = model_value
+        else:
+            agent.pop("model", None)
 
-    temperature_value = payload.get("temperature")
-    if temperature_value in {"", None}:
-        agent.pop("temperature", None)
-    else:
-        try:
-            agent["temperature"] = float(temperature_value)
-        except (TypeError, ValueError):
-            return {"updated": False, "message": "Temperature musi być liczbą."}
+    if "temperature" in payload:
+        temperature_value = payload.get("temperature")
+        if temperature_value in {"", None}:
+            agent.pop("temperature", None)
+        else:
+            try:
+                agent["temperature"] = float(temperature_value)
+            except (TypeError, ValueError):
+                return {"updated": False, "message": "Temperature musi być liczbą."}
+
+    if "description" in payload:
+        agent["description"] = str(payload.get("description") or "")
+    if "skills" in payload:
+        agent["skills"] = _string_list(payload.get("skills"))
+    if "tools" in payload:
+        agent["tools"] = _string_list(payload.get("tools"))
+    if "prompt" in payload:
+        prompt_path = agent.get("prompt")
+        if not prompt_path:
+            return {"updated": False, "message": "Agent nie ma pliku promptu."}
+        path = (config_path.parent.parent / str(prompt_path)).resolve()
+        root = config_path.parent.parent.resolve()
+        if root not in path.parents and path != root:
+            return {"updated": False, "message": "Niepoprawna ścieżka promptu."}
+        path.write_text(str(payload.get("prompt") or ""), encoding="utf-8")
 
     config_path.write_text(yaml.safe_dump(raw, sort_keys=False, allow_unicode=False), encoding="utf-8")
     load_config(config_path)
     return {"updated": True, "message": "Ustawienia agenta zapisane."}
+
+
+def _string_list(value: object) -> list[str]:
+    if isinstance(value, list):
+        return [str(item).strip() for item in value if str(item).strip()]
+    return [item.strip() for item in str(value or "").replace("\n", ",").split(",") if item.strip()]
 
 
 def model_options_for_provider(provider: str) -> list[str]:

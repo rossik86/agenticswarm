@@ -311,6 +311,7 @@ class SwarmNodes:
                 "build": state.get("build_result"),
                 "quality": state.get("quality_result"),
                 "supervisor_gate": state.get("supervisor_gate"),
+                "learning": state.get("learning_result"),
                 "artifacts": state.get("artifacts", []),
                 "instruction": (
                     "Return only the final Markdown deliverable content. The system will save your response to final.md, so do not say that final.md is missing. "
@@ -335,6 +336,39 @@ class SwarmNodes:
         update = {"final_answer": result.text, "artifacts": [*state.get("artifacts", []), metadata]}
         self.artifacts.record_room_io(run_id, "main", final_input, {"final_answer": result.text, "artifact": metadata}, "Final markdown ready.")
         self._checkpoint(run_id, "final_response", {**state, **update})
+        return update
+
+    async def self_learning(self, state: AgentState) -> AgentState:
+        run_id = state["run_id"]
+        payload = {
+            "user_request": state["user_input"],
+            "plan": state.get("plan"),
+            "research": state.get("research_result"),
+            "analysis": state.get("analysis"),
+            "build": state.get("build_result"),
+            "quality": state.get("quality_result"),
+            "supervisor_gate": state.get("supervisor_gate"),
+            "artifacts": state.get("artifacts", []),
+            "instruction": (
+                "Act as an evaluator-optimizer/reflection agent for the entire run. "
+                "Assess every agent and room handoff for quality, missing context, hallucination risk, unclear contracts, and avoidable rework. "
+                "Do not change the final deliverable directly; produce learning notes that main and future runs can use. "
+                "Return Markdown with: run quality score, per-agent observations, flow issues, reusable lessons, prompt/skill/config recommendations, and next-run guardrails."
+            ),
+        }
+        result, metadata = await self._run_artifact_agent(state, "self_learner", payload, "Self-learning quality pass")
+        learning_result = {"summary": metadata["summary"], "artifact_path": metadata["artifact_path"], "text": result.text[:3000]}
+        if self.memory:
+            self.memory.remember(run_id, "self_learner", result.text[:1200])
+        update = {"learning_result": learning_result, "artifacts": [*state.get("artifacts", []), metadata]}
+        self.artifacts.record_room_io(
+            run_id,
+            "learner",
+            payload,
+            learning_result,
+            metadata["summary"],
+        )
+        self._checkpoint(run_id, "self_learning", {**state, **update})
         return update
 
     async def _run_artifact_agent(

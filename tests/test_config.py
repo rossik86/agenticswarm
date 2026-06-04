@@ -13,7 +13,9 @@ def test_load_default_config() -> None:
     assert "analyst_negative" in config.agents
     assert "builder" in config.agents
     assert "reviewer_negative" in config.agents
+    assert "self_learner" in config.agents
     assert config.agents["researcher"].output_artifact == "researcher.md"
+    assert config.agents["self_learner"].output_artifact == "learning.md"
 
 
 def test_artifact_run_id_uses_available_timezone(tmp_path: Path) -> None:

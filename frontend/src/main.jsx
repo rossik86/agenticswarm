@@ -10,6 +10,7 @@ import {
   Clock3,
   Play,
   RotateCcw,
+  Settings,
   TerminalSquare,
   XCircle
 } from "lucide-react";
@@ -24,6 +25,7 @@ const ROOMS = [
   { role: "researcher", label: "Research Council", x: 20, y: 72, kind: "council" },
   { role: "builder", label: "Builder Bay", x: 48, y: 73, kind: "single" },
   { role: "reviewer", label: "Review Council", x: 77, y: 72, kind: "council" },
+  { role: "learner", label: "Learning Lab", x: 71, y: 47, kind: "single" },
   { role: "main", label: "Main CO", x: 48, y: 43, kind: "command" }
 ];
 
@@ -51,6 +53,7 @@ function App() {
   const [pendingCheckpoint, setPendingCheckpoint] = useState(null);
   const [modal, setModal] = useState(null);
   const [agentSettings, setAgentSettings] = useState(null);
+  const [settingsDrawerOpen, setSettingsDrawerOpen] = useState(false);
   const [notice, setNotice] = useState("");
 
   async function refresh() {
@@ -140,6 +143,7 @@ function App() {
               item.json()
             );
             setAgentSettings(settings.agent);
+            setSettingsDrawerOpen(true);
             setNotice("");
           }}
         />
@@ -151,10 +155,17 @@ function App() {
         </button>
       ) : null}
       {modal ? <TextModal modal={modal} onClose={() => setModal(null)} /> : null}
-      {agentSettings ? (
-        <AgentSettingsModal
+      {settingsDrawerOpen ? (
+        <AgentSettingsDrawer
           settings={agentSettings}
-          onClose={() => setAgentSettings(null)}
+          agents={agents}
+          onSelectAgent={async (agentName) => {
+            const settings = await fetch(`/agent-settings.json?agent=${encodeURIComponent(agentName)}`, { cache: "no-store" }).then((item) =>
+              item.json()
+            );
+            setAgentSettings(settings.agent);
+          }}
+          onClose={() => setSettingsDrawerOpen(false)}
           onSave={async (nextSettings) => {
             setNotice(`Zapisuję model dla: ${nextSettings.name}`);
             const response = await fetch("/agent-settings.json", {
@@ -217,10 +228,6 @@ function OfficeMap({ rooms, onSelect, selected, events, agents }) {
   );
   return (
     <section className="office" aria-label="Agent town office" ref={officeRef}>
-      <div className="corridor horizontal" />
-      <div className="corridor vertical" />
-      <div className="corridor diagonal-a" />
-      <div className="corridor diagonal-b" />
       <RunFlowOverlay flow={flow} onSelect={onSelect} selected={selected} />
       <div className="legacy-rooms" aria-hidden="true">{rooms.map((room) => (
         <Room key={room.role} room={room} onSelect={onSelect} selected={selected} />
@@ -426,6 +433,7 @@ function AgentOptions({ agent, onOpenAgentSettings }) {
   return (
     <section className="agent-options">
       <button type="button" onClick={() => onOpenAgentSettings(agent)}>
+        <Settings size={14} />
         Ustawienia agenta
       </button>
       <span>{displayAgentName(agent)}</span>
@@ -683,11 +691,38 @@ function TextModal({ modal, onClose }) {
   );
 }
 
-function AgentSettingsModal({ settings, onClose, onSave }) {
-  const [provider, setProvider] = useState(settings.provider || "default");
-  const [model, setModel] = useState(settings.model || settings.effective_model || "");
-  const [temperature, setTemperature] = useState(settings.temperature ?? "");
+function AgentSettingsDrawer({ settings, agents, onSelectAgent, onClose, onSave }) {
+  const [tab, setTab] = useState("runtime");
+  const [provider, setProvider] = useState("default");
+  const [model, setModel] = useState("");
+  const [temperature, setTemperature] = useState("");
+  const [descriptionText, setDescriptionText] = useState("");
+  const [promptText, setPromptText] = useState("");
+  const [skillsText, setSkillsText] = useState("");
+  const [toolsText, setToolsText] = useState("");
   const [saving, setSaving] = useState(false);
+  useEffect(() => {
+    if (!settings) return;
+    setProvider(settings.provider || "default");
+    setModel(settings.model || settings.effective_model || "");
+    setTemperature(settings.temperature ?? "");
+    setDescriptionText(settings.description || "");
+    setPromptText(settings.prompt || "");
+    setSkillsText((settings.skills || []).join("\n"));
+    setToolsText((settings.tools || []).join("\n"));
+  }, [settings]);
+  if (!settings) {
+    return (
+      <div className="drawer-backdrop" role="presentation" onClick={onClose}>
+        <aside className="settings-drawer" aria-label="Ustawienia agentów" onClick={(event) => event.stopPropagation()}>
+          <header>
+            <h2>Ustawienia agentów</h2>
+            <button type="button" onClick={onClose}>Zamknij</button>
+          </header>
+        </aside>
+      </div>
+    );
+  }
   const selectedProvider = provider === "default" ? settings.effective_provider : provider;
   const modelOptions = MODEL_OPTIONS[selectedProvider] || settings.model_options || [];
   const rows = [
@@ -699,18 +734,36 @@ function AgentSettingsModal({ settings, onClose, onSave }) {
     ["Prompt", settings.prompt_path || "-"]
   ];
   return (
-    <div className="modal-backdrop" role="presentation" onClick={onClose}>
-      <section className="settings-modal" role="dialog" aria-modal="true" aria-label="Ustawienia agenta" onClick={(event) => event.stopPropagation()}>
+    <div className="drawer-backdrop" role="presentation" onClick={onClose}>
+      <section className="settings-drawer" role="dialog" aria-modal="true" aria-label="Ustawienia agentów" onClick={(event) => event.stopPropagation()}>
         <header>
           <div>
-            <h2>{settings.display_name || settings.name}</h2>
-            <p>{settings.description || "Brak opisu."}</p>
+            <h2>Ustawienia agentów</h2>
+            <p>{settings.display_name || settings.name}</p>
           </div>
           <button type="button" onClick={onClose}>
             Zamknij
           </button>
         </header>
-        <div className="settings-grid">
+        <div className="settings-agent-picker">
+          <select value={settings.name} onChange={(event) => onSelectAgent(event.target.value)}>
+            {agents.map((agent) => (
+              <option key={agent.name} value={agent.name}>{displayAgentName(agent)}</option>
+            ))}
+          </select>
+        </div>
+        <nav className="settings-tabs" aria-label="Sekcje ustawień">
+          {[
+            ["runtime", "Konfiguracja"],
+            ["prompt", "Prompt"],
+            ["instructions", "Instrukcje"],
+            ["skills", "Skille MD"],
+            ["mcp", "MCP / tools"]
+          ].map(([id, label]) => (
+            <button type="button" className={tab === id ? "active" : ""} onClick={() => setTab(id)} key={id}>{label}</button>
+          ))}
+        </nav>
+        {tab === "runtime" ? <div className="settings-grid">
           <section>
             <h3>Konfiguracja</h3>
             {rows.map(([label, value]) => (
@@ -773,8 +826,24 @@ function AgentSettingsModal({ settings, onClose, onSave }) {
             <h3>Relacje</h3>
             <TagList values={[...(settings.delegates_to || []), ...(settings.validates || [])]} empty="Brak relacji." />
           </section>
-        </div>
-        <section className="prompt-section">
+        </div> : null}
+        {tab === "skills" ? <section className="prompt-section">
+          <h3>Lista skilli</h3>
+          <form
+            className="settings-edit-form"
+            onSubmit={async (event) => {
+              event.preventDefault();
+              setSaving(true);
+              try {
+                await onSave({ agent: settings.name, skills: skillsText });
+              } finally {
+                setSaving(false);
+              }
+            }}
+          >
+            <textarea value={skillsText} onChange={(event) => setSkillsText(event.target.value)} rows={7} />
+            <button type="submit" disabled={saving}>{saving ? "Zapisuję..." : "Zapisz skille"}</button>
+          </form>
           <h3>Skill markdowns</h3>
           <div className="skill-doc-list">
             {(settings.skill_markdowns || []).length ? (
@@ -791,9 +860,65 @@ function AgentSettingsModal({ settings, onClose, onSave }) {
               <p className="muted">Brak plików markdown dla skills tego agenta.</p>
             )}
           </div>
+        </section> : null}
+        {tab === "prompt" ? <section className="prompt-section">
           <h3>Prompt</h3>
-          <pre>{settings.prompt || "Brak promptu."}</pre>
-        </section>
+          <form
+            className="settings-edit-form"
+            onSubmit={async (event) => {
+              event.preventDefault();
+              setSaving(true);
+              try {
+                await onSave({ agent: settings.name, prompt: promptText });
+              } finally {
+                setSaving(false);
+              }
+            }}
+          >
+            <textarea value={promptText} onChange={(event) => setPromptText(event.target.value)} rows={16} />
+            <button type="submit" disabled={saving}>{saving ? "Zapisuję..." : "Zapisz prompt"}</button>
+          </form>
+        </section> : null}
+        {tab === "instructions" ? <section className="prompt-section">
+          <h3>Instrukcje agenta</h3>
+          <form
+            className="settings-edit-form"
+            onSubmit={async (event) => {
+              event.preventDefault();
+              setSaving(true);
+              try {
+                await onSave({ agent: settings.name, description: descriptionText });
+              } finally {
+                setSaving(false);
+              }
+            }}
+          >
+            <textarea value={descriptionText} onChange={(event) => setDescriptionText(event.target.value)} rows={7} />
+            <button type="submit" disabled={saving}>{saving ? "Zapisuję..." : "Zapisz instrukcje"}</button>
+          </form>
+          <h3>Relacje</h3>
+          <TagList values={[...(settings.delegates_to || []), ...(settings.validates || [])]} empty="Brak relacji." />
+        </section> : null}
+        {tab === "mcp" ? <section className="prompt-section">
+          <h3>MCP / tools</h3>
+          <form
+            className="settings-edit-form"
+            onSubmit={async (event) => {
+              event.preventDefault();
+              setSaving(true);
+              try {
+                await onSave({ agent: settings.name, tools: toolsText });
+              } finally {
+                setSaving(false);
+              }
+            }}
+          >
+            <textarea value={toolsText} onChange={(event) => setToolsText(event.target.value)} rows={7} />
+            <button type="submit" disabled={saving}>{saving ? "Zapisuję..." : "Zapisz MCP/tools"}</button>
+          </form>
+          <h3>Dostępne skille</h3>
+          <TagList values={settings.skills || []} empty="Brak skilli." />
+        </section> : null}
       </section>
     </div>
   );
@@ -885,6 +1010,7 @@ function belongsToRoom(checkpoint, role) {
   if (role === "researcher") return node.includes("research");
   if (role === "builder") return node.includes("build");
   if (role === "reviewer") return node.includes("review");
+  if (role === "learner") return node.includes("learn");
   if (role === "supervisor") return node.includes("supervisor");
   return false;
 }
@@ -897,6 +1023,7 @@ function belongsToAgent(checkpoint, agent) {
   if (name === "main") return node.includes("main") || node.includes("final");
   if (name === "supervisor") return node.includes("supervisor");
   if (name === "builder") return node.includes("build");
+  if (name === "self_learner") return node.includes("learn");
   if (name === "researcher") return node.includes("research");
   if (name === "reviewer") return node.includes("review");
   if (name.endsWith("_neutral")) return node.includes(agent.role);
@@ -930,7 +1057,8 @@ function displayAgentName(agent) {
     builder: "Builder",
     reviewer_positive: "Positive Quality Reviewer",
     reviewer_negative: "Quality and Security Guardian",
-    reviewer: "Neutral Review Arbiter"
+    reviewer: "Neutral Review Arbiter",
+    self_learner: "Self-Learning Quality Optimizer"
   };
   return agent.display_name || names[agent.name] || String(agent.name || "").replace(/_/g, " ");
 }
@@ -1047,6 +1175,7 @@ function flowPoint(role, mode) {
     researcher: { x: 20, y: 72 },
     builder: { x: 48, y: 73 },
     reviewer: { x: 77, y: 72 },
+    learner: { x: 71, y: 47 },
     main: { x: 48, y: 43 }
   };
   const tablet = {
@@ -1057,7 +1186,8 @@ function flowPoint(role, mode) {
     main: { x: 50, y: 35 },
     researcher: { x: 26, y: 63 },
     builder: { x: 50, y: 80 },
-    reviewer: { x: 74, y: 63 }
+    reviewer: { x: 74, y: 63 },
+    learner: { x: 76, y: 43 }
   };
   const mobile = {
     start: { x: 16, y: 3 },
@@ -1067,7 +1197,8 @@ function flowPoint(role, mode) {
     main: { x: 50, y: 39 },
     researcher: { x: 50, y: 55 },
     builder: { x: 50, y: 71 },
-    reviewer: { x: 50, y: 87 }
+    reviewer: { x: 50, y: 82 },
+    learner: { x: 50, y: 94 }
   };
   const points = mode === "mobile" ? mobile : mode === "tablet" ? tablet : desktop;
   return points[role] || desktop.main;
@@ -1080,6 +1211,7 @@ function roleFromEvent(event) {
   if (name.includes("research")) return "researcher";
   if (name.includes("build") || name.includes("builder")) return "builder";
   if (name.includes("review")) return "reviewer";
+  if (name.includes("learner") || name.includes("learning")) return "learner";
   if (name.includes("supervisor")) return "supervisor";
   if (name.includes("main") || name.includes("final")) return "main";
   return null;

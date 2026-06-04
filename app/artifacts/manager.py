@@ -250,6 +250,8 @@ def _timestamp() -> str:
 
 
 def _agent_role(agent_name: str) -> str:
+    if agent_name == "self_learner":
+        return "learner"
     if agent_name.startswith("analyst"):
         return "analyst"
     if agent_name.startswith("researcher"):
@@ -284,6 +286,7 @@ def _agent_display_name(agent_name: str) -> str:
         "reviewer_positive": "Positive Quality Reviewer",
         "reviewer_negative": "Quality and Security Guardian",
         "reviewer": "Neutral Review Arbiter",
+        "self_learner": "Self-Learning Quality Optimizer",
     }
     return names.get(agent_name, agent_name.replace("_", " ").title())
 

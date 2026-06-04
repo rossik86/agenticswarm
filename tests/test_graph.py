@@ -30,6 +30,8 @@ class FakeRunner:
             )
         if agent_name == "main":
             return AgentRunResult(text="Final answer", parsed_json=None)
+        if agent_name == "self_learner":
+            return AgentRunResult(text="# Learning\nImprove handoffs.", parsed_json=None)
         if agent_name == "analyst_neutral" and "consensus" in input_text.lower():
             return AgentRunResult(
                 text='{"questions": [], "specification": "Spec", "risks": [], "recommendation": "Proceed"}',
@@ -68,10 +70,12 @@ def test_graph_writes_specialist_and_review_artifacts(tmp_path: Path) -> None:
         "reviewer",
         "reviewer_negative",
         "reviewer_positive",
+        "self_learner",
     }.issubset({artifact["agent"] for artifact in result["artifacts"]})
     assert (tmp_path / "runs" / "test-run" / "researcher.md").exists()
     assert (tmp_path / "runs" / "test-run" / "builder.md").exists()
     assert (tmp_path / "runs" / "test-run" / "review.md").exists()
+    assert (tmp_path / "runs" / "test-run" / "learning.md").exists()
     assert (tmp_path / "runs" / "test-run" / "final.md").exists()
 
 
@@ -101,7 +105,9 @@ def test_graph_routes_supervisor_before_analyst_and_records_room_io(tmp_path: Pa
     assert calls.index("supervisor") < calls.index("analyst_positive")
     assert status["room_io"]["supervisor"]["history"]
     assert status["room_io"]["analyst"]["history"]
+    assert status["room_io"]["learner"]["history"]
     assert status["agents"]["main"]["artifact_path"].endswith("final.md")
+    assert calls.index("self_learner") < calls.index("main", calls.index("self_learner"))
     final_main_call = [text for agent, text in runner.calls if agent == "main"][-1]
     assert "system will save your response to final.md" in final_main_call
 
