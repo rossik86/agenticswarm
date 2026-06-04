@@ -30,8 +30,10 @@ import {
 import roomTile from "./assets/pixel-room.png";
 import commandRoom from "./assets/pixel-command-room.png";
 import robotSprite from "./assets/pixel-robot.png";
+import { buildAgentScorecards, buildQualityGates, summarizeRunDiff } from "./dashboardInsights.js";
 import { buildFlowSteps, flowStatusFromEvent, greenShade, roleFromEvent } from "./flowUtils.js";
 import { compactRunId, filterRuns, formatRunDate, runPreview, runTimestamp, runTitle } from "./runUtils.js";
+import { agentAction, ambientState, conversationLine, roomQueueCount } from "./townInteractions.js";
 import "./styles.css";
 
 const ROOMS = [
@@ -154,6 +156,7 @@ function App() {
         </button>
         <OfficeMap
           rooms={rooms}
+          status={status}
           onSelect={(nextSelection) => {
             setSelected(nextSelection);
             setInspectorOpen(true);
@@ -161,6 +164,15 @@ function App() {
           selected={selected}
           events={events}
           agents={agents}
+          onTownAction={async (payload) => {
+            const response = await fetch("/town/action", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(payload)
+            }).then((item) => item.json());
+            setNotice(response.message || "Akcja town zapisana.");
+            await refresh();
+          }}
         />
         <button
           className="inspector-trigger"
@@ -208,6 +220,15 @@ function App() {
               setNotice("");
             }}
             learningPending={learningPending}
+            onTownAction={async (payload) => {
+              const response = await fetch("/town/action", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(payload)
+              }).then((item) => item.json());
+              setNotice(response.message || "Akcja town zapisana.");
+              await refresh();
+            }}
             onImproveFromLearning={async () => {
               if (!status?.run_id) return;
               setLearningPending(true);
@@ -326,6 +347,9 @@ function RunPickerDrawer({ status, runs, selectedRunId, onSelectRun, onClose }) 
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [sort, setSort] = useState("newest");
+  const [compareRunId, setCompareRunId] = useState("");
+  const [runDiff, setRunDiff] = useState(null);
+  const [diffLoading, setDiffLoading] = useState(false);
   const visibleRuns = useMemo(
     () => filterRuns(runs, { query, status: statusFilter, datePreset, dateFrom, dateTo, sort }),
     [runs, query, statusFilter, datePreset, dateFrom, dateTo, sort]
@@ -404,6 +428,44 @@ function RunPickerDrawer({ status, runs, selectedRunId, onSelectRun, onClose }) 
             Wyczyść filtry
           </button>
         </div>
+        <section className="run-diff-panel">
+          <div>
+            <strong>Run diff</strong>
+            <span>Porównaj aktywny run z innym przebiegiem.</span>
+          </div>
+          <select value={compareRunId} onChange={(event) => setCompareRunId(event.target.value)}>
+            <option value="">wybierz run do porównania</option>
+            {runs.filter((run) => run.run_id !== activeRunId).map((run) => (
+              <option key={run.run_id} value={run.run_id}>{runTitle(run)} · {compactRunId(run.run_id)}</option>
+            ))}
+          </select>
+          <button
+            type="button"
+            disabled={!activeRunId || !compareRunId || diffLoading}
+            onClick={async () => {
+              setDiffLoading(true);
+              try {
+                const data = await fetch(`/run-diff.json?base=${encodeURIComponent(activeRunId)}&target=${encodeURIComponent(compareRunId)}`, { cache: "no-store" }).then((item) => item.json());
+                setRunDiff(data);
+              } finally {
+                setDiffLoading(false);
+              }
+            }}
+          >
+            <GitCompare size={14} />
+            {diffLoading ? "Porównuję..." : "Porównaj"}
+          </button>
+          {runDiff ? (
+            <div className="run-diff-summary">
+              {summarizeRunDiff(runDiff).map((item) => (
+                <div className={item.tone} key={item.label}>
+                  <span>{item.label}</span>
+                  <strong>{item.value}</strong>
+                </div>
+              ))}
+            </div>
+          ) : null}
+        </section>
         <div className="run-card-list">
           {visibleRuns.length ? visibleRuns.map((run) => (
             <button
@@ -429,12 +491,13 @@ function RunPickerDrawer({ status, runs, selectedRunId, onSelectRun, onClose }) 
   );
 }
 
-function OfficeMap({ rooms, onSelect, selected, events, agents }) {
+function OfficeMap({ rooms, status, onSelect, selected, events, agents, onTownAction }) {
   const officeRef = useRef(null);
   const [flowMode, setFlowMode] = useState(() => getFlowMode());
   const [officeSize, setOfficeSize] = useState({ width: 1000, height: 850 });
   const steps = useMemo(() => buildFlowSteps(events), [events]);
   const [activeStep, setActiveStep] = useState(0);
+  const [replayPlaying, setReplayPlaying] = useState(false);
   useEffect(() => {
     const updateMode = () => setFlowMode(getFlowMode());
     window.addEventListener("resize", updateMode);
@@ -448,6 +511,19 @@ function OfficeMap({ rooms, onSelect, selected, events, agents }) {
     });
   }, [steps.length]);
   useEffect(() => {
+    if (!replayPlaying || !steps.length) return undefined;
+    const timer = window.setInterval(() => {
+      setActiveStep((current) => {
+        if (current >= steps.length) {
+          setReplayPlaying(false);
+          return steps.length;
+        }
+        return current + 1;
+      });
+    }, 900);
+    return () => window.clearInterval(timer);
+  }, [replayPlaying, steps.length]);
+  useEffect(() => {
     if (!officeRef.current) return undefined;
     const observer = new ResizeObserver(([entry]) => {
       setOfficeSize({ width: entry.contentRect.width, height: entry.contentRect.height });
@@ -456,13 +532,29 @@ function OfficeMap({ rooms, onSelect, selected, events, agents }) {
     return () => observer.disconnect();
   }, []);
   const flow = useMemo(
-    () => buildRunFlow(events, rooms, flowMode, officeSize, selected, onSelect, activeStep || steps.length, steps),
-    [events, rooms, flowMode, officeSize, selected, onSelect, activeStep, steps]
+    () => buildRunFlow(events, rooms, flowMode, officeSize, selected, onSelect, activeStep || steps.length, steps, onTownAction, status?.run_id),
+    [events, rooms, flowMode, officeSize, selected, onSelect, activeStep, steps, onTownAction, status?.run_id]
   );
+  const ambient = ambientState(status, events);
   return (
-    <section className="office-shell">
-      <RunProgressPanel steps={steps} activeStep={activeStep || steps.length} onSelectStep={setActiveStep} />
-      <section className="office" aria-label="Agent town office" ref={officeRef}>
+    <section className={`office-shell ambient-${ambient}`}>
+      <AmbientBanner state={ambient} />
+      <RunProgressPanel
+        steps={steps}
+        activeStep={activeStep || steps.length}
+        replayPlaying={replayPlaying}
+        onSelectStep={(step) => {
+          setReplayPlaying(false);
+          setActiveStep(step);
+        }}
+        onReplay={() => {
+          if (!steps.length) return;
+          setActiveStep(1);
+          setReplayPlaying(true);
+        }}
+        onPause={() => setReplayPlaying(false)}
+      />
+      <section className={`office ambient-${ambient}`} aria-label="Agent town office" ref={officeRef}>
         <RunFlowOverlay flow={flow} onSelect={onSelect} selected={selected} />
         <div className="legacy-rooms" aria-hidden="true">{rooms.map((room) => (
           <Room key={room.role} room={room} onSelect={onSelect} selected={selected} />
@@ -472,12 +564,29 @@ function OfficeMap({ rooms, onSelect, selected, events, agents }) {
   );
 }
 
-function RunProgressPanel({ steps, activeStep, onSelectStep }) {
+function AmbientBanner({ state }) {
+  const labels = {
+    alert: "ALERT: run zatrzymany na błędzie",
+    approval: "APPROVAL: town czeka na decyzję",
+    completed: "COMPLETED: run zakończony",
+    running: "RUNNING: agenci pracują",
+    idle: "IDLE: town gotowe"
+  };
+  return <div className={`ambient-banner ${state}`}>{labels[state] || labels.idle}</div>;
+}
+
+function RunProgressPanel({ steps, activeStep, replayPlaying, onSelectStep, onReplay, onPause }) {
   return (
     <section className="run-progress-panel" aria-label="Postęp runu checkpoint po checkpointcie">
       <div>
         <strong>Run progress</strong>
         <span>{steps.length ? `krok ${activeStep} / ${steps.length}` : "brak kroków"}</span>
+      </div>
+      <div className="replay-controls">
+        <button type="button" disabled={!steps.length} onClick={replayPlaying ? onPause : onReplay}>
+          {replayPlaying ? <Clock3 size={14} /> : <Play size={14} />}
+          {replayPlaying ? "Pause" : "Replay"}
+        </button>
       </div>
       <div className="progress-steps">
         {steps.length ? steps.map((step) => (
@@ -540,15 +649,31 @@ function FlowRoomNode({ data }) {
           {data.subLabel ? <span>{data.subLabel}</span> : null}
         </div>
       ) : (
-        <div className={`flow-room-card ${data.selected ? "selected" : ""}`}>
+        <div
+          className={`flow-room-card ${data.selected ? "selected" : ""} ${data.active ? "drop-ready" : ""}`}
+          onDragOver={(event) => event.preventDefault()}
+          onDrop={(event) => {
+            event.preventDefault();
+            const sourceAgent = event.dataTransfer.getData("text/agent");
+            if (!sourceAgent || !data.onTownAction) return;
+            data.onTownAction({
+              action: "manual_handoff",
+              run_id: data.runId,
+              source: sourceAgent,
+              target: data.role,
+              reason: `Manual drag handoff to ${data.label}`
+            });
+          }}
+        >
           <span className="room-light" />
           <img src={image} alt="" className="room-art" />
           <span className="room-name">{data.label}</span>
           <span className="room-count">{data.agentCount}</span>
+          {data.queueCount ? <span className="room-queue">{data.queueCount}</span> : null}
           {(data.agents || []).map((agent, index) => (
             <AgentSprite key={agent.name} agent={agent} slot={ROOM_AGENT_SLOTS[index % ROOM_AGENT_SLOTS.length]} onSelect={data.onSelect} />
           ))}
-          {data.failedAgent ? <ErrorBubble agent={data.failedAgent} /> : data.active ? <SpeechBubble agents={data.agents} /> : null}
+          {data.failedAgent ? <ErrorBubble agent={data.failedAgent} /> : data.active ? <SpeechBubble agents={data.agents} council={data.agents?.length > 1} /> : null}
         </div>
       )}
       <Handle id="out" type="source" position={Position.Right} className="flow-handle" />
@@ -589,13 +714,19 @@ function Room({ room, onSelect, selected }) {
 }
 
 function AgentSprite({ agent, slot, onSelect }) {
+  const action = agentAction(agent);
   return (
     <span
-      className={`agent-sprite ${agent.status || "unknown"}`}
+      className={`agent-sprite ${agent.status || "unknown"} action-${action}`}
       style={slot}
       role="button"
       tabIndex={0}
+      draggable
       title={displayAgentName(agent)}
+      onDragStart={(event) => {
+        event.dataTransfer.setData("text/agent", agent.name);
+        event.dataTransfer.effectAllowed = "move";
+      }}
       onClick={(event) => {
         event.stopPropagation();
         onSelect({ type: "agent", id: agent.name });
@@ -609,6 +740,7 @@ function AgentSprite({ agent, slot, onSelect }) {
     >
       <img src={robotSprite} alt="" />
       {agent.status === "failed" ? <span className="agent-error-mark">!</span> : null}
+      {action !== "idle" ? <span className="agent-action">{action}</span> : null}
       <small>{shortName(displayAgentName(agent))}</small>
     </span>
   );
@@ -625,10 +757,14 @@ function ErrorBubble({ agent }) {
   );
 }
 
-function SpeechBubble({ agents }) {
+function SpeechBubble({ agents, council = false }) {
   const active = agents.find((agent) => agent.status === "running") || agents[0];
-  const text = active?.summary || active?.error || "Analizuję następny krok...";
-  return <span className="speech">{text.slice(0, 74)}</span>;
+  const lines = council ? agents.slice(0, 3).map(conversationLine) : [active?.summary || active?.error || conversationLine(active)];
+  return (
+    <span className={`speech ${council ? "council-speech" : ""}`}>
+      {lines.map((line, index) => <em key={`${line}-${index}`}>{line.slice(0, 74)}</em>)}
+    </span>
+  );
 }
 
 function Inspector({
@@ -642,6 +778,7 @@ function Inspector({
   onOpenText,
   onOpenAgentSettings,
   learningPending,
+  onTownAction,
   onImproveFromLearning
 }) {
   if (selectedAgent) {
@@ -682,6 +819,7 @@ function Inspector({
           <CompactField label="Wyjście pokoju" value={roomIo?.output || roomOutput(room) || "-"} onOpen={onOpenText} />
         </>
       )}
+      <RoomConsole room={room} status={status} onTownAction={onTownAction} />
       <ResultPanel
         status={status}
         room={room}
@@ -689,7 +827,9 @@ function Inspector({
         learningPending={learningPending}
         onImproveFromLearning={onImproveFromLearning}
       />
+      <QualityGatesPanel room={room} status={status} checkpoints={roomCheckpoints} />
       <TokenUsagePanel usage={status?.token_usage} selectedRole={room?.role} agents={room?.agents || []} showAllRoles={isMainRoom} />
+      {isMainRoom ? <AgentScorecardsPanel status={status} /> : null}
       <CouncilList room={room} />
       <RoomHistory roomIo={roomIo} onOpen={onOpenText} />
       <CheckpointList checkpoints={roomCheckpoints} onAction={onCheckpointAction} pendingCheckpoint={pendingCheckpoint} />
@@ -706,6 +846,54 @@ function AgentOptions({ agent, onOpenAgentSettings }) {
         Ustawienia agenta
       </button>
       <span>{displayAgentName(agent)}</span>
+    </section>
+  );
+}
+
+function RoomConsole({ room, status, onTownAction }) {
+  const [note, setNote] = useState("");
+  const [target, setTarget] = useState("builder");
+  const [busy, setBusy] = useState(false);
+  if (!room || !onTownAction) return null;
+  async function submit(payload) {
+    setBusy(true);
+    try {
+      await onTownAction(payload);
+      setNote("");
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <section className="panel-section room-console">
+      <h2>Room console</h2>
+      <textarea
+        rows={3}
+        value={note}
+        onChange={(event) => setNote(event.target.value)}
+        placeholder={`Notatka dla pokoju ${room.label}`}
+      />
+      <div className="room-console-actions">
+        <button
+          type="button"
+          disabled={busy || !note.trim()}
+          onClick={() => submit({ action: "room_note", run_id: status?.run_id, room: room.role, note })}
+        >
+          Wyślij note
+        </button>
+        <select value={target} onChange={(event) => setTarget(event.target.value)}>
+          {ROOMS.filter((item) => item.role !== room.role && item.role !== "main").map((item) => (
+            <option key={item.role} value={item.role}>{item.label}</option>
+          ))}
+        </select>
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => submit({ action: "manual_handoff", run_id: status?.run_id, source: room.role, target, reason: note || "Manual room console handoff" })}
+        >
+          Handoff
+        </button>
+      </div>
     </section>
   );
 }
@@ -1197,7 +1385,7 @@ function AgentSettingsDrawer({ settings, onClose, onSave }) {
   );
 }
 
-function GlobalResourcesDrawer({ resources, runs = [], onOpenText, onClose, onSave }) {
+function GlobalResourcesDrawer({ resources, runs = [], onOpenText, onClose, onSave, onReload }) {
   const [tab, setTab] = useState("agents");
   const [selectedSkill, setSelectedSkill] = useState("");
   const [skillName, setSkillName] = useState("");
@@ -1215,6 +1403,7 @@ function GlobalResourcesDrawer({ resources, runs = [], onOpenText, onClose, onSa
   const [diffTarget, setDiffTarget] = useState("");
   const [runDiff, setRunDiff] = useState(null);
   const [saving, setSaving] = useState(false);
+  const [rollingBackVersion, setRollingBackVersion] = useState("");
   const skills = resources?.skills || [];
   const mcps = resources?.mcp || [];
   useEffect(() => {
@@ -1416,16 +1605,39 @@ function GlobalResourcesDrawer({ resources, runs = [], onOpenText, onClose, onSa
             <h3>Prompt / Skill versions</h3>
             <div className="resource-list">
               {versions.length ? versions.map((version) => (
-                <button
-                  className="resource-card as-button"
-                  type="button"
-                  key={version.id}
-                  onClick={() => onOpenText?.({ title: `${version.resource} · ${version.created_at}`, text: version.content || "" })}
-                >
-                  <strong>{version.resource}</strong>
-                  <span>{version.reason} · {version.created_at}</span>
-                  <small>{version.id}</small>
-                </button>
+                <article className="resource-card version-card" key={version.id}>
+                  <button
+                    className="as-button"
+                    type="button"
+                    onClick={() => onOpenText?.({ title: `${version.resource} · ${version.created_at}`, text: version.content || "" })}
+                  >
+                    <strong>{version.resource}</strong>
+                    <span>{version.reason} · {version.created_at}</span>
+                    <small>{version.id}</small>
+                  </button>
+                  <button
+                    type="button"
+                    disabled={rollingBackVersion === version.id}
+                    onClick={async () => {
+                      setRollingBackVersion(version.id);
+                      try {
+                        await fetch("/versions/rollback", {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({ version_id: version.id })
+                        }).then((item) => item.json());
+                        const data = await fetch("/versions.json", { cache: "no-store" }).then((item) => item.json());
+                        setVersions(data.versions || []);
+                        await onReload?.();
+                      } finally {
+                        setRollingBackVersion("");
+                      }
+                    }}
+                  >
+                    <RotateCcw size={14} />
+                    Rollback
+                  </button>
+                </article>
               )) : <p className="muted">Brak wersji promptów/skilli.</p>}
             </div>
           </section>
@@ -1472,6 +1684,44 @@ function TagList({ values, empty }) {
     </div>
   ) : (
     <p className="muted">{empty}</p>
+  );
+}
+
+function QualityGatesPanel({ room, status, checkpoints }) {
+  const gates = buildQualityGates(room, status, checkpoints);
+  return (
+    <section className="panel-section quality-gates-panel">
+      <h2>Quality gates</h2>
+      <div className="quality-gates">
+        {gates.map((gate) => (
+          <div className={`quality-gate ${gate.status}`} key={gate.label}>
+            {gate.status === "passed" ? <CheckCircle2 size={14} /> : <XCircle size={14} />}
+            <span>{gate.label}</span>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function AgentScorecardsPanel({ status }) {
+  const scorecards = buildAgentScorecards(status);
+  return (
+    <section className="panel-section scorecards-panel">
+      <h2>Agent scorecards</h2>
+      <div className="scorecard-list">
+        {scorecards.length ? scorecards.map((card) => (
+          <article className={`scorecard ${card.status}`} key={card.agent}>
+            <div>
+              <strong>{card.name}</strong>
+              <span>{card.role} · {card.status}</span>
+            </div>
+            <b>{card.score}</b>
+            <small>{formatNumber(card.tokens)} tokens</small>
+          </article>
+        )) : <p className="muted">Brak danych agentów dla scorecardów.</p>}
+      </div>
+    </section>
   );
 }
 
@@ -1597,7 +1847,7 @@ function displayAgentName(agent) {
   return agent.display_name || names[agent.name] || String(agent.name || "").replace(/_/g, " ");
 }
 
-function buildRunFlow(events, rooms, mode = "desktop", size = { width: 1000, height: 850 }, selected, onSelect, activeStep = null, flowSteps = null) {
+function buildRunFlow(events, rooms, mode = "desktop", size = { width: 1000, height: 850 }, selected, onSelect, activeStep = null, flowSteps = null, onTownAction = null, runId = "") {
   const eventStatuses = {};
   for (const event of events || []) {
     const role = roleFromEvent(event);
@@ -1634,8 +1884,12 @@ function buildRunFlow(events, rooms, mode = "desktop", size = { width: 1000, hei
         agentCount: roomAgents.length,
         active: roomAgents.some((agent) => agent.status === "running"),
         failedAgent,
+        queueCount: roomQueueCount(room, events),
         selected: selected?.type === "room" && selected.id === role,
-        onSelect
+        onSelect,
+        onTownAction,
+        runId,
+        role
       },
       draggable: false,
       selectable: false

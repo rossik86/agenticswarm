@@ -6,6 +6,7 @@ import sqlite3
 from app.artifacts.manager import ArtifactManager
 from app.dashboard import (
     append_checkpoint_action,
+    append_town_action,
     apply_learning_actions,
     build_checkpoint_prompt,
     read_checkpoint,
@@ -17,6 +18,7 @@ from app.dashboard import (
     read_agent_settings,
     read_global_resources,
     read_prompt_versions,
+    restore_resource_version,
     read_run_diff,
     read_task_templates,
     render_dashboard,
@@ -115,6 +117,19 @@ def test_checkpoint_api_helpers_read_and_log_actions(tmp_path: Path) -> None:
     assert '"action": "resume"' in action_path.read_text(encoding="utf-8")
 
 
+def test_town_actions_persist_human_note_and_manual_handoff(tmp_path: Path) -> None:
+    action_path = tmp_path / "town_actions.jsonl"
+
+    note = append_town_action(action_path, "room_note", {"run_id": "run-1", "room": "analyst", "note": "Uwzględnij Lotto Plus"})
+    handoff = append_town_action(action_path, "manual_handoff", {"run_id": "run-1", "source": "reviewer", "target": "builder", "reason": "Popraw artefakt"})
+
+    body = action_path.read_text(encoding="utf-8")
+    assert note["accepted"] is True
+    assert handoff["accepted"] is True
+    assert '"action": "room_note"' in body
+    assert '"target": "builder"' in body
+
+
 def test_dashboard_lists_runs_and_reads_artifact_only_run(tmp_path: Path) -> None:
     manager = ArtifactManager(tmp_path, Path("runs"))
     manager.start_run("run-1", "Input", ["main"])
@@ -189,6 +204,19 @@ def test_dashboard_global_skill_and_mcp_crud(tmp_path: Path) -> None:
     delete_result = update_global_resource(tmp_path, config_path, {"type": "skill", "action": "delete", "name": "domain_guard"})
     assert delete_result["updated"] is True
     assert not (tmp_path / "skills" / "domain_guard.md").exists()
+
+
+def test_resource_version_restore_rolls_back_skill_content(tmp_path: Path) -> None:
+    (tmp_path / "skills").mkdir()
+    skill_path = tmp_path / "skills" / "quality.md"
+    skill_path.write_text("# Old\n", encoding="utf-8")
+    update_global_resource(tmp_path, tmp_path / "configs" / "agents.yaml", {"type": "skill", "name": "quality", "content": "# New"})
+    version = read_prompt_versions(tmp_path)[0]
+
+    result = restore_resource_version(tmp_path, str(version["id"]))
+
+    assert result["updated"] is True
+    assert skill_path.read_text(encoding="utf-8") == "# Old\n"
 
 
 def test_learning_improvement_requires_learning_artifact(tmp_path: Path) -> None:

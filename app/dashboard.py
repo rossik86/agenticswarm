@@ -137,6 +137,17 @@ def serve_dashboard(project_root: Path, config_path: Path, host: str = "127.0.0.
                     config = load_config(config_path)
                 self._send_json(result)
                 return
+            if parsed.path == "/versions/rollback":
+                payload = self._read_json_body()
+                result = restore_resource_version(project_root, str(payload.get("version_id") or ""))
+                self._send_json(result)
+                return
+            if parsed.path == "/town/action":
+                payload = self._read_json_body()
+                action = str(payload.get("action") or "").strip()
+                result = append_town_action(project_root / "workspace" / "town_actions.jsonl", action, payload)
+                self._send_json(result)
+                return
             if parsed.path == "/templates.json":
                 payload = self._read_json_body()
                 result = update_task_template(project_root, payload)
@@ -619,6 +630,24 @@ def record_resource_version(project_root: Path, resource: str, content: str, rea
     return record
 
 
+def restore_resource_version(project_root: Path, version_id: str) -> dict[str, object]:
+    version = next((item for item in read_prompt_versions(project_root) if str(item.get("id")) == str(version_id)), None)
+    if not version:
+        return {"updated": False, "message": "Nie znaleziono wersji."}
+    resource = str(version.get("resource") or "").strip()
+    if not resource:
+        return {"updated": False, "message": "Wersja nie ma zasobu."}
+    target = (project_root / resource).resolve()
+    root = project_root.resolve()
+    if root not in target.parents and target != root:
+        return {"updated": False, "message": "Niepoprawna ścieżka zasobu."}
+    if target.exists() and target.is_file():
+        record_resource_version(project_root, resource, target.read_text(encoding="utf-8"), "version_rollback")
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(str(version.get("content") or ""), encoding="utf-8")
+    return {"updated": True, "message": f"Przywrócono wersję {version_id}.", "resource": resource}
+
+
 def read_run_diff(artifact_root: Path, base_run_id: str, target_run_id: str) -> dict[str, object]:
     base = read_status(artifact_root, base_run_id)
     target = read_status(artifact_root, target_run_id)
@@ -1006,6 +1035,14 @@ def append_checkpoint_action(path: Path, action: str, payload: dict[str, object]
     with path.open("a", encoding="utf-8") as handle:
         handle.write(json.dumps(record, ensure_ascii=True) + "\n")
     return record
+
+
+def append_town_action(path: Path, action: str, payload: dict[str, object]) -> dict[str, object]:
+    allowed = {"room_note", "manual_handoff"}
+    if action not in allowed:
+        return {"accepted": False, "message": "Nieobsługiwana akcja town."}
+    record = append_checkpoint_action(path, action, payload)
+    return {"accepted": True, "message": "Akcja town zapisana.", **record}
 
 
 def build_checkpoint_prompt(action: str, checkpoint: dict[str, object]) -> str:
