@@ -30,6 +30,25 @@ import {
 import roomTile from "./assets/pixel-room.png";
 import commandRoom from "./assets/pixel-command-room.png";
 import robotSprite from "./assets/pixel-robot.png";
+import roomMain from "./assets/generated/room-main.png";
+import roomSupervisor from "./assets/generated/room-supervisor.png";
+import roomAnalyst from "./assets/generated/room-analyst.png";
+import roomResearcher from "./assets/generated/room-researcher.png";
+import roomBuilder from "./assets/generated/room-builder.png";
+import roomReviewer from "./assets/generated/room-reviewer.png";
+import roomLearner from "./assets/generated/room-learner.png";
+import agentMain from "./assets/generated/agent-main.png";
+import agentSupervisor from "./assets/generated/agent-supervisor.png";
+import agentAnalystPositive from "./assets/generated/agent-analyst-positive.png";
+import agentAnalystNegative from "./assets/generated/agent-analyst-negative.png";
+import agentAnalystNeutral from "./assets/generated/agent-analyst-neutral.png";
+import agentResearcher from "./assets/generated/agent-researcher.png";
+import agentResearcherNegative from "./assets/generated/agent-researcher-negative.png";
+import agentBuilder from "./assets/generated/agent-builder.png";
+import agentReviewerPositive from "./assets/generated/agent-reviewer-positive.png";
+import agentReviewerNegative from "./assets/generated/agent-reviewer-negative.png";
+import agentReviewerNeutral from "./assets/generated/agent-reviewer-neutral.png";
+import agentSelfLearner from "./assets/generated/agent-self-learner.png";
 import { buildAgentScorecards, buildQualityGates, summarizeRunDiff } from "./dashboardInsights.js";
 import { buildFlowSteps, flowStatusFromEvent, greenShade, roleFromEvent } from "./flowUtils.js";
 import { compactRunId, filterRuns, formatRunDate, runPreview, runTimestamp, runTitle } from "./runUtils.js";
@@ -37,20 +56,45 @@ import { agentAction, ambientState, conversationLine, roomQueueCount } from "./t
 import "./styles.css";
 
 const ROOMS = [
-  { role: "analyst", label: "Analyst Council", x: 20, y: 20, kind: "council" },
-  { role: "supervisor", label: "Supervisor Gate", x: 71, y: 20, kind: "single" },
-  { role: "researcher", label: "Research Council", x: 20, y: 72, kind: "council" },
-  { role: "builder", label: "Builder Bay", x: 48, y: 73, kind: "single" },
-  { role: "reviewer", label: "Review Council", x: 77, y: 72, kind: "council" },
-  { role: "learner", label: "Learning Lab", x: 71, y: 47, kind: "single" },
-  { role: "main", label: "Main CO", x: 48, y: 43, kind: "command" }
+  { role: "analyst", label: "Analyst Council", x: 31, y: 25, kind: "council" },
+  { role: "supervisor", label: "Supervisor Gate", x: 69, y: 25, kind: "single" },
+  { role: "researcher", label: "Research Council", x: 26, y: 50, kind: "council" },
+  { role: "learner", label: "Learning Lab", x: 74, y: 50, kind: "single" },
+  { role: "builder", label: "Builder Bay", x: 31, y: 75, kind: "single" },
+  { role: "reviewer", label: "Review Council", x: 69, y: 75, kind: "council" },
+  { role: "main", label: "Main CO", x: 50, y: 50, kind: "command" }
 ];
 
 const ROOM_AGENT_SLOTS = [
-  { left: "22%", top: "56%" },
-  { left: "49%", top: "62%" },
-  { left: "68%", top: "50%" }
+  { left: "27%", top: "57%" },
+  { left: "50%", top: "63%" },
+  { left: "68%", top: "53%" }
 ];
+
+const ROOM_ASSETS = {
+  main: roomMain,
+  supervisor: roomSupervisor,
+  analyst: roomAnalyst,
+  researcher: roomResearcher,
+  builder: roomBuilder,
+  reviewer: roomReviewer,
+  learner: roomLearner
+};
+
+const AGENT_ASSETS = {
+  main: agentMain,
+  supervisor: agentSupervisor,
+  analyst_positive: agentAnalystPositive,
+  analyst_negative: agentAnalystNegative,
+  analyst_neutral: agentAnalystNeutral,
+  researcher: agentResearcher,
+  researcher_negative: agentResearcherNegative,
+  builder: agentBuilder,
+  reviewer_positive: agentReviewerPositive,
+  reviewer_negative: agentReviewerNegative,
+  reviewer: agentReviewerNeutral,
+  self_learner: agentSelfLearner
+};
 
 const FLOW_NODE_TYPES = { flowRoom: FlowRoomNode };
 const MODEL_OPTIONS = {
@@ -639,7 +683,7 @@ function RunFlowOverlay({ flow, onSelect, selected }) {
 }
 
 function FlowRoomNode({ data }) {
-  const image = data.kind === "command" ? commandRoom : roomTile;
+  const image = roomAssetFor(data.role, data.kind);
   return (
     <div className={`flow-rf-node ${data.kind || ""} ${data.status || ""}`}>
       <Handle id="in" type="target" position={Position.Left} className="flow-handle" />
@@ -685,7 +729,7 @@ function Room({ room, onSelect, selected }) {
   const active = room.agents.some((agent) => agent.status === "running");
   const failed = room.agents.some((agent) => agent.status === "failed");
   const failedAgent = room.agents.find((agent) => agent.status === "failed");
-  const image = room.kind === "command" ? commandRoom : roomTile;
+  const image = roomAssetFor(room.role, room.kind);
 
   return (
     <button
@@ -715,6 +759,7 @@ function Room({ room, onSelect, selected }) {
 
 function AgentSprite({ agent, slot, onSelect }) {
   const action = agentAction(agent);
+  const image = agentAssetFor(agent);
   return (
     <span
       className={`agent-sprite ${agent.status || "unknown"} action-${action}`}
@@ -738,7 +783,7 @@ function AgentSprite({ agent, slot, onSelect }) {
         }
       }}
     >
-      <img src={robotSprite} alt="" />
+      <img src={image} alt="" />
       {agent.status === "failed" ? <span className="agent-error-mark">!</span> : null}
       {action !== "idle" ? <span className="agent-action">{action}</span> : null}
       <small>{shortName(displayAgentName(agent))}</small>
@@ -1847,6 +1892,28 @@ function displayAgentName(agent) {
   return agent.display_name || names[agent.name] || String(agent.name || "").replace(/_/g, " ");
 }
 
+function roomAssetFor(role, kind) {
+  return ROOM_ASSETS[role] || (kind === "command" ? commandRoom : roomTile);
+}
+
+function agentAssetFor(agent) {
+  const name = String(agent?.name || "");
+  if (AGENT_ASSETS[name]) return AGENT_ASSETS[name];
+  if (name.includes("analyst_positive")) return AGENT_ASSETS.analyst_positive;
+  if (name.includes("analyst_negative")) return AGENT_ASSETS.analyst_negative;
+  if (name.includes("analyst")) return AGENT_ASSETS.analyst_neutral;
+  if (name.includes("researcher_negative")) return AGENT_ASSETS.researcher_negative;
+  if (name.includes("research")) return AGENT_ASSETS.researcher;
+  if (name.includes("reviewer_positive")) return AGENT_ASSETS.reviewer_positive;
+  if (name.includes("reviewer_negative")) return AGENT_ASSETS.reviewer_negative;
+  if (name.includes("review")) return AGENT_ASSETS.reviewer;
+  if (name.includes("supervisor")) return AGENT_ASSETS.supervisor;
+  if (name.includes("builder")) return AGENT_ASSETS.builder;
+  if (name.includes("learner")) return AGENT_ASSETS.self_learner;
+  if (name.includes("main")) return AGENT_ASSETS.main;
+  return robotSprite;
+}
+
 function buildRunFlow(events, rooms, mode = "desktop", size = { width: 1000, height: 850 }, selected, onSelect, activeStep = null, flowSteps = null, onTownAction = null, runId = "") {
   const eventStatuses = {};
   for (const event of events || []) {
@@ -1929,8 +1996,8 @@ function buildRunFlow(events, rooms, mode = "desktop", size = { width: 1000, hei
 function toReactFlowPosition(point, size, role) {
   const isTerminal = role === "start" || role === "end";
   return {
-    x: (point.x / 100) * size.width - (isTerminal ? 58 : 119),
-    y: (point.y / 100) * size.height - (isTerminal ? 24 : 98)
+    x: (point.x / 100) * size.width - (isTerminal ? 58 : 82),
+    y: (point.y / 100) * size.height - (isTerminal ? 24 : 67)
   };
 }
 
@@ -1942,26 +2009,26 @@ function getFlowMode() {
 
 function flowPoint(role, mode) {
   const desktop = {
-    start: { x: 6, y: 43 },
-    end: { x: 94, y: 43 },
-    analyst: { x: 20, y: 20 },
-    supervisor: { x: 71, y: 20 },
-    researcher: { x: 20, y: 72 },
-    builder: { x: 48, y: 73 },
-    reviewer: { x: 77, y: 72 },
-    learner: { x: 71, y: 47 },
-    main: { x: 48, y: 43 }
+    start: { x: 8, y: 50 },
+    end: { x: 92, y: 50 },
+    analyst: { x: 31, y: 25 },
+    supervisor: { x: 69, y: 25 },
+    researcher: { x: 26, y: 50 },
+    learner: { x: 74, y: 50 },
+    builder: { x: 31, y: 75 },
+    reviewer: { x: 69, y: 75 },
+    main: { x: 50, y: 50 }
   };
   const tablet = {
-    start: { x: 8, y: 35 },
-    end: { x: 92, y: 35 },
-    analyst: { x: 27, y: 13 },
-    supervisor: { x: 73, y: 13 },
-    main: { x: 50, y: 35 },
-    researcher: { x: 26, y: 63 },
-    builder: { x: 50, y: 80 },
-    reviewer: { x: 74, y: 63 },
-    learner: { x: 76, y: 43 }
+    start: { x: 8, y: 46 },
+    end: { x: 92, y: 46 },
+    analyst: { x: 29, y: 20 },
+    supervisor: { x: 71, y: 20 },
+    researcher: { x: 24, y: 46 },
+    learner: { x: 76, y: 46 },
+    builder: { x: 31, y: 72 },
+    reviewer: { x: 69, y: 72 },
+    main: { x: 50, y: 46 }
   };
   const mobile = {
     start: { x: 16, y: 3 },

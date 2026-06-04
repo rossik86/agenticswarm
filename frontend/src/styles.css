@@ -515,15 +515,15 @@ button {
 
 .flow-room-card {
   position: relative;
-  width: 238px;
-  height: 196px;
+  width: 164px;
+  height: 134px;
   text-align: left;
 }
 
 .flow-room-card::after {
   content: "";
   position: absolute;
-  inset: 15px 8px 18px;
+  inset: 12px 6px 14px;
   border-radius: 8px;
   background: rgba(20, 27, 36, 0.42);
   filter: blur(18px);
@@ -639,8 +639,8 @@ button {
 
 .room {
   position: absolute;
-  width: 238px;
-  height: 196px;
+  width: 164px;
+  height: 134px;
   padding: 0;
   border: 0;
   background: transparent;
@@ -652,7 +652,7 @@ button {
 .room::after {
   content: "";
   position: absolute;
-  inset: 15px 8px 18px;
+  inset: 12px 6px 14px;
   border-radius: 8px;
   background: rgba(20, 27, 36, 0.42);
   filter: blur(18px);
@@ -691,9 +691,9 @@ button {
 .room-light {
   position: absolute;
   left: 50%;
-  top: 16px;
-  width: 92px;
-  height: 36px;
+  top: 12px;
+  width: 72px;
+  height: 28px;
   border-radius: 999px;
   transform: translateX(-50%);
   background: transparent;
@@ -716,28 +716,28 @@ button {
 }
 
 .room-name {
-  left: 18px;
-  top: 12px;
-  max-width: 185px;
-  padding: 4px 7px;
-  font-size: 12px;
+  left: 12px;
+  top: 10px;
+  max-width: 124px;
+  padding: 3px 6px;
+  font-size: 10px;
   font-weight: 750;
 }
 
 .room-count {
-  right: 20px;
-  top: 12px;
-  min-width: 26px;
-  padding: 4px 6px;
+  right: 12px;
+  top: 10px;
+  min-width: 22px;
+  padding: 3px 5px;
   text-align: center;
-  font-size: 12px;
+  font-size: 10px;
 }
 
 .agent-sprite {
   position: absolute;
   z-index: 5;
-  width: 54px;
-  height: 70px;
+  width: 48px;
+  height: 62px;
   transform: translate(-50%, -50%);
   display: grid;
   justify-items: center;
@@ -747,7 +747,7 @@ button {
 }
 
 .agent-sprite img {
-  width: 58px;
+  width: 54px;
   height: 58px;
   object-fit: contain;
   image-rendering: pixelated;
@@ -779,62 +779,62 @@ button {
 .agent-action {
   position: absolute;
   left: 50%;
-  top: -7px;
+  top: -6px;
   transform: translateX(-50%);
   z-index: 9;
-  max-width: 78px;
+  max-width: 64px;
   padding: 1px 5px;
   border-radius: 999px;
   background: #fff8da;
   color: #4e3c00;
   border: 1px solid #d6a400;
-  font-size: 9px;
+  font-size: 8px;
   font-weight: 850;
   white-space: nowrap;
 }
 
 .agent-error-mark {
   position: absolute;
-  top: 2px;
-  right: 5px;
+  top: 1px;
+  right: 2px;
   z-index: 8;
-  width: 20px;
-  height: 20px;
+  width: 17px;
+  height: 17px;
   display: grid;
   place-items: center;
   border: 2px solid #fff3f2;
   border-radius: 999px;
   background: #db3d35;
   color: #fff;
-  font-size: 14px;
+  font-size: 12px;
   font-weight: 900;
   box-shadow: 0 0 0 2px rgba(88, 19, 16, 0.34);
 }
 
 .agent-sprite small {
-  min-width: 28px;
+  min-width: 22px;
   padding: 1px 4px;
   border-radius: 4px;
   background: rgba(16, 24, 34, 0.86);
   color: #f5f7fb;
   text-align: center;
-  font-size: 10px;
+  font-size: 8px;
   font-weight: 800;
 }
 
 .speech {
   position: absolute;
-  right: 18px;
-  top: 38px;
+  right: 8px;
+  top: 31px;
   z-index: 8;
-  width: 170px;
-  min-height: 38px;
-  padding: 7px 9px;
+  width: 132px;
+  min-height: 32px;
+  padding: 6px 7px;
   border-radius: 8px;
   border: 2px solid #273443;
   background: #fff9df;
   color: #20242c;
-  font-size: 11px;
+  font-size: 9px;
   line-height: 1.25;
   box-shadow: 0 8px 18px rgba(31, 42, 55, 0.24);
 }
@@ -845,7 +845,7 @@ button {
 }
 
 .council-speech {
-  width: 190px;
+  width: 148px;
   display: grid;
   gap: 2px;
 }
@@ -864,7 +864,7 @@ button {
 }
 
 .error-speech strong {
-  font-size: 11px;
+  font-size: 9px;
   overflow-wrap: anywhere;
 }
 
@@ -880,10 +880,10 @@ button {
 .speech::after {
   content: "";
   position: absolute;
-  bottom: -8px;
-  left: 22px;
-  width: 12px;
-  height: 12px;
+  bottom: -7px;
+  left: 18px;
+  width: 10px;
+  height: 10px;
   background: #fff9df;
   border-right: 2px solid #273443;
   border-bottom: 2px solid #273443;
@@ -2217,43 +2217,43 @@ button {
   }
 
   .room {
-    width: 230px;
-    height: 188px;
+    width: 164px;
+    height: 134px;
   }
 
   .room.analyst {
-    left: 27% !important;
-    top: 13% !important;
+    left: 29% !important;
+    top: 20% !important;
   }
 
   .room.supervisor {
-    left: 73% !important;
-    top: 13% !important;
+    left: 71% !important;
+    top: 20% !important;
   }
 
   .room.main {
     left: 50% !important;
-    top: 35% !important;
+    top: 46% !important;
   }
 
   .room.researcher {
-    left: 26% !important;
-    top: 63% !important;
+    left: 24% !important;
+    top: 46% !important;
   }
 
   .room.builder {
-    left: 50% !important;
-    top: 80% !important;
+    left: 31% !important;
+    top: 72% !important;
   }
 
   .room.reviewer {
-    left: 74% !important;
-    top: 63% !important;
+    left: 69% !important;
+    top: 72% !important;
   }
 
   .room.learner {
     left: 76% !important;
-    top: 43% !important;
+    top: 46% !important;
   }
 }
 
@@ -2307,8 +2307,8 @@ button {
 
   .room {
     left: 50% !important;
-    width: min(290px, 88vw);
-    height: 232px;
+    width: min(220px, 82vw);
+    height: 180px;
   }
 
   .room.analyst {
