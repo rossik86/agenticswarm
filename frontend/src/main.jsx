@@ -300,6 +300,22 @@ function App() {
                 setLearningPending(false);
               }
             }}
+            onApplyLearningProposals={async (proposalIds) => {
+              if (!status?.run_id || !proposalIds.length) return;
+              setLearningPending(true);
+              setNotice("Zastosowuję wybrane propozycje learnera.");
+              try {
+                const response = await fetch("/learning/proposals/apply", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ run_id: status.run_id, proposal_ids: proposalIds })
+                }).then((item) => item.json());
+                setNotice(response.message || "Propozycje learnera zastosowane.");
+                await refresh();
+              } finally {
+                setLearningPending(false);
+              }
+            }}
           />
         </aside>
       </section>
@@ -865,7 +881,8 @@ function Inspector({
   onOpenAgentSettings,
   learningPending,
   onTownAction,
-  onImproveFromLearning
+  onImproveFromLearning,
+  onApplyLearningProposals
 }) {
   if (selectedAgent) {
     const agentEvents = events.filter((event) => String(event.event || "").includes(selectedAgent.name));
@@ -905,7 +922,18 @@ function Inspector({
           <CompactField label="Wyjście pokoju" value={roomIo?.output || roomOutput(room) || "-"} onOpen={onOpenText} />
         </>
       )}
+      {isMainRoom ? <TopologyPanel topology={status?.execution_topology} onOpen={onOpenText} /> : null}
       <RoomConsole room={room} status={status} onTownAction={onTownAction} />
+      {(isMainRoom || room?.role === "researcher" || room?.role === "builder" || room?.role === "reviewer") ? (
+        <ClaimsPanel claims={status?.claims || []} onOpen={onOpenText} />
+      ) : null}
+      {(isMainRoom || room?.role === "learner") ? (
+        <LearningProposalsPanel
+          proposals={status?.learning_proposals || []}
+          busy={learningPending}
+          onApply={onApplyLearningProposals}
+        />
+      ) : null}
       <ResultPanel
         status={status}
         room={room}
@@ -991,6 +1019,92 @@ function RunIOPanel({ status, onOpen }) {
       <CompactField label="Input" value={status?.user_input || status?.message || "-"} onOpen={onOpen} limit={150} />
       <CompactField label="Output" value={status?.final_answer || "-"} onOpen={onOpen} limit={150} />
       <CompactField label="Folder" value={status?.path || "-"} onOpen={onOpen} limit={90} />
+    </section>
+  );
+}
+
+function TopologyPanel({ topology, onOpen }) {
+  const stages = topology?.stages || [];
+  const edges = topology?.edges || [];
+  return (
+    <section className="panel-section topology-panel">
+      <h2>Dynamic topology</h2>
+      {stages.length ? (
+        <>
+          <div className="topology-stages">
+            {stages.map((stage, index) => (
+              <span key={`${stage}-${index}`}>{stage}</span>
+            ))}
+          </div>
+          <button type="button" onClick={() => onOpen?.({ title: "Execution topology", text: JSON.stringify(topology, null, 2) })}>
+            Pokaż DAG
+          </button>
+          <small>{edges.length} planned edges · {topology.mode || "static"}</small>
+        </>
+      ) : (
+        <p className="muted">Brak dynamicznej topologii dla tego runu.</p>
+      )}
+    </section>
+  );
+}
+
+function ClaimsPanel({ claims, onOpen }) {
+  return (
+    <section className="panel-section claims-panel">
+      <h2>Grounding claims</h2>
+      {claims.length ? (
+        <div className="claims-list">
+          {claims.slice(0, 5).map((claim) => (
+            <button
+              type="button"
+              key={claim.id}
+              onClick={() => onOpen?.({ title: `${claim.id} · ${claim.agent}`, text: JSON.stringify(claim, null, 2) })}
+            >
+              <strong>{claim.id}</strong>
+              <span>{String(claim.claim || "").slice(0, 120)}</span>
+              <small>{claim.confidence || "unknown"} · {claim.source || "no source"}</small>
+            </button>
+          ))}
+        </div>
+      ) : (
+        <p className="muted">Brak claimów. Builder powinien oznaczać fakty domenowe jako wymagające weryfikacji.</p>
+      )}
+    </section>
+  );
+}
+
+function LearningProposalsPanel({ proposals, busy, onApply }) {
+  const [selected, setSelected] = useState([]);
+  useEffect(() => {
+    setSelected([]);
+  }, [proposals]);
+  function toggle(id) {
+    setSelected((current) => current.includes(id) ? current.filter((item) => item !== id) : [...current, id]);
+  }
+  return (
+    <section className="panel-section learning-proposals-panel">
+      <h2>Learning proposals</h2>
+      {proposals.length ? (
+        <>
+          <div className="proposal-list">
+            {proposals.slice(0, 8).map((proposal) => (
+              <label key={proposal.id}>
+                <input type="checkbox" checked={selected.includes(proposal.id)} onChange={() => toggle(proposal.id)} />
+                <span>
+                  <strong>{proposal.id} · {proposal.target}</strong>
+                  <small>{proposal.action}</small>
+                  {proposal.recommendation}
+                </span>
+              </label>
+            ))}
+          </div>
+          <button type="button" disabled={busy || !selected.length} onClick={() => onApply?.(selected)}>
+            <Save size={14} /> Zastosuj zaznaczone
+          </button>
+        </>
+      ) : (
+        <p className="muted">Brak strukturalnych propozycji learnera w tym runie.</p>
+      )}
     </section>
   );
 }
@@ -1159,7 +1273,7 @@ function ResultPanel({ status, room, onOpen, learningPending, onImproveFromLearn
   const artifacts = room?.role === "main" ? collectArtifacts(status) : roomArtifacts(status, room);
   const finalAnswer = status?.final_answer;
   const learningArtifact = collectArtifacts(status).find((artifact) => artifact.agent === "self_learner");
-  const canImprove = Boolean(onImproveFromLearning && status?.run_id && learningArtifact && status?.status === "completed");
+  const canImprove = Boolean(onImproveFromLearning && status?.run_id && learningArtifact && ["completed", "needs_revision"].includes(status?.status));
   return (
     <section className="panel-section result-panel">
       <h2>Wynik pracy</h2>
@@ -1486,11 +1600,13 @@ function GlobalResourcesDrawer({ resources, runs = [], onboarding, onOpenText, o
   const [templates, setTemplates] = useState([]);
   const [templateDraft, setTemplateDraft] = useState({ id: "", name: "", prompt: "", required_artifacts: "", quality_gates: "" });
   const [versions, setVersions] = useState([]);
+  const [presets, setPresets] = useState([]);
   const [diffBase, setDiffBase] = useState("");
   const [diffTarget, setDiffTarget] = useState("");
   const [runDiff, setRunDiff] = useState(null);
   const [welcomeProvider, setWelcomeProvider] = useState("codex_cli");
   const [welcomeModel, setWelcomeModel] = useState("gpt-5.4-mini");
+  const [healthResult, setHealthResult] = useState(null);
   const [saving, setSaving] = useState(false);
   const [rollingBackVersion, setRollingBackVersion] = useState("");
   const skills = resources?.skills || [];
@@ -1527,6 +1643,9 @@ function GlobalResourcesDrawer({ resources, runs = [], onboarding, onOpenText, o
     if (tab === "versions") {
       fetch("/versions.json", { cache: "no-store" }).then((item) => item.json()).then((data) => setVersions(data.versions || []));
     }
+    if (tab === "presets") {
+      fetch("/presets.json", { cache: "no-store" }).then((item) => item.json()).then((data) => setPresets(data.presets || []));
+    }
   }, [tab]);
   async function submit(payload) {
     setSaving(true);
@@ -1552,6 +1671,7 @@ function GlobalResourcesDrawer({ resources, runs = [], onboarding, onOpenText, o
             ["agents", "Agenci", Settings],
             ["skills", "Skille", FileText],
             ["mcp", "MCP", Database],
+            ["presets", "Presets", BrainCircuit],
             ["templates", "Templates", ClipboardList],
             ["versions", "Versions", History],
             ["diff", "Diff", GitCompare]
@@ -1601,9 +1721,32 @@ function GlobalResourcesDrawer({ resources, runs = [], onboarding, onOpenText, o
                 <KeyValue label="Current provider" value={welcomeState.provider || "-"} />
                 <KeyValue label="Current model" value={welcomeState.model || "-"} />
               </div>
-              <button type="submit" disabled={saving}>
-                <Save size={14} /> Zapisz dla wszystkich agentów
-              </button>
+              {healthResult ? (
+                <div className={`health-result ${healthResult.ok ? "ok" : "failed"}`}>
+                  <strong>{healthResult.ok ? "Provider działa" : "Provider nie działa"}</strong>
+                  <span>{healthResult.message || healthResult.output || "-"}</span>
+                </div>
+              ) : null}
+              <div className="form-actions">
+                <button type="button" disabled={saving} onClick={async () => {
+                  setSaving(true);
+                  try {
+                    const result = await fetch("/provider-health.json", {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ provider: welcomeProvider, model: welcomeModel })
+                    }).then((item) => item.json());
+                    setHealthResult(result);
+                  } finally {
+                    setSaving(false);
+                  }
+                }}>
+                  <Activity size={14} /> Sprawdź provider
+                </button>
+                <button type="submit" disabled={saving}>
+                  <Save size={14} /> Zapisz dla wszystkich agentów
+                </button>
+              </div>
             </form>
           </section>
         ) : null}
@@ -1685,6 +1828,37 @@ function GlobalResourcesDrawer({ resources, runs = [], onboarding, onOpenText, o
                 </button>
               </div>
             </form>
+          </section>
+        ) : null}
+        {tab === "presets" ? (
+          <section className="resource-section">
+            <h3>Agent presets</h3>
+            <p className="muted">Preset ustawia modele, temperatury i dodatkowe skille dla wybranego typu pracy.</p>
+            <div className="resource-list">
+              {presets.map((preset) => (
+                <article className="resource-card preset-card" key={preset.id}>
+                  <strong>{preset.name}</strong>
+                  <span>{preset.id}</span>
+                  <small>{preset.description}</small>
+                  <button type="button" disabled={saving} onClick={async () => {
+                    setSaving(true);
+                    try {
+                      await fetch("/presets.json", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ preset: preset.id })
+                      }).then((item) => item.json());
+                      await onReload?.();
+                    } finally {
+                      setSaving(false);
+                    }
+                  }}>
+                    <Save size={14} /> Zastosuj preset
+                  </button>
+                </article>
+              ))}
+              {!presets.length ? <p className="muted">Brak presetów.</p> : null}
+            </div>
           </section>
         ) : null}
         {tab === "templates" ? (
@@ -1822,6 +1996,7 @@ function WelcomeConfigurationModal({ onboarding, onClose, onSave }) {
   const [provider, setProvider] = useState(onboarding?.provider || "codex_cli");
   const [model, setModel] = useState(onboarding?.model || "gpt-5.4-mini");
   const [saving, setSaving] = useState(false);
+  const [healthResult, setHealthResult] = useState(null);
   const providerOptions = onboarding?.provider_options || ["agents_sdk", "codex_cli", "openhands", "copilot"];
   const modelOptions = MODEL_OPTIONS[provider] || onboarding?.model_options || [];
   return (
@@ -1860,7 +2035,28 @@ function WelcomeConfigurationModal({ onboarding, onClose, onSave }) {
               {modelOptions.map((option) => <option value={option} key={option} />)}
             </datalist>
           </label>
+          {healthResult ? (
+            <div className={`health-result ${healthResult.ok ? "ok" : "failed"}`}>
+              <strong>{healthResult.ok ? "Provider działa" : "Provider nie działa"}</strong>
+              <span>{healthResult.message || healthResult.output || "-"}</span>
+            </div>
+          ) : null}
           <div className="welcome-actions">
+            <button type="button" disabled={saving} onClick={async () => {
+              setSaving(true);
+              try {
+                const result = await fetch("/provider-health.json", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ provider, model })
+                }).then((item) => item.json());
+                setHealthResult(result);
+              } finally {
+                setSaving(false);
+              }
+            }}>
+              <Activity size={14} /> Sprawdź provider
+            </button>
             <button type="submit" disabled={saving}>
               <Save size={14} /> Zapisz i przejdź do dashboardu
             </button>

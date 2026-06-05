@@ -74,6 +74,9 @@ class ArtifactManager:
             },
             "artifacts": [],
             "room_io": {},
+            "execution_topology": {},
+            "claims": [],
+            "learning_proposals": [],
             "roles": _roles(agent_names),
             "token_usage": {
                 "total_tokens": 0,
@@ -197,6 +200,27 @@ class ArtifactManager:
         data["updated_at"] = _timestamp()
         self._write_status(run_id, data)
 
+    def record_execution_topology(self, run_id: str, topology: dict[str, Any]) -> None:
+        data = self.read_status(run_id)
+        data["execution_topology"] = topology
+        data["updated_at"] = _timestamp()
+        self._write_json_artifact(run_id, "execution_topology.json", topology)
+        self._write_status(run_id, data)
+
+    def record_claims(self, run_id: str, claims: list[dict[str, Any]]) -> None:
+        data = self.read_status(run_id)
+        data["claims"] = claims
+        data["updated_at"] = _timestamp()
+        self._write_json_artifact(run_id, "claims.json", {"claims": claims})
+        self._write_status(run_id, data)
+
+    def record_learning_proposals(self, run_id: str, proposals: list[dict[str, Any]]) -> None:
+        data = self.read_status(run_id)
+        data["learning_proposals"] = proposals
+        data["updated_at"] = _timestamp()
+        self._write_json_artifact(run_id, "learning_proposals.json", {"proposals": proposals})
+        self._write_status(run_id, data)
+
     def finish_run(
         self,
         run_id: str,
@@ -209,7 +233,7 @@ class ArtifactManager:
         data["status"] = status
         data["updated_at"] = now
         data["finished_at"] = now
-        if status in {"completed", "failed", "stopped"}:
+        if status in {"completed", "failed", "stopped", "needs_revision"}:
             for agent in data.get("agents", {}).values():
                 if isinstance(agent, dict) and agent.get("status") == "running":
                     agent["status"] = status
@@ -243,6 +267,10 @@ class ArtifactManager:
         body = json.dumps(status, ensure_ascii=True, indent=2)
         self.status_path(run_id).write_text(body + "\n", encoding="utf-8")
         self.latest_status_path().write_text(body + "\n", encoding="utf-8")
+
+    def _write_json_artifact(self, run_id: str, filename: str, payload: dict[str, Any]) -> None:
+        path = self.run_dir(run_id) / filename
+        path.write_text(json.dumps(payload, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
 
 
 def _timestamp() -> str:

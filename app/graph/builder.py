@@ -7,7 +7,14 @@ from langgraph.graph import END, START, StateGraph
 from app.agents.runner import AgentRunner
 from app.artifacts.manager import ArtifactManager
 from app.config.schema import SwarmConfig
-from app.graph.nodes import SwarmNodes, should_delegate, should_retry_builder_completeness, should_retry_review
+from app.graph.nodes import (
+    SwarmNodes,
+    should_delegate,
+    should_run_analysis_after_research,
+    should_run_research,
+    should_retry_builder_completeness,
+    should_retry_review,
+)
 from app.graph.state import AgentState
 from app.checkpoint.store import CheckpointStore
 from app.memory.store import MemoryStore
@@ -54,8 +61,23 @@ def build_graph(
             "final": "final_response",
         },
     )
-    graph.add_edge("supervisor_route", "research_panel")
-    graph.add_edge("research_panel", "analyst_panel")
+    graph.add_conditional_edges(
+        "supervisor_route",
+        should_run_research,
+        {
+            "research": "research_panel",
+            "analysis": "analyst_panel",
+            "build": "build_solution",
+        },
+    )
+    graph.add_conditional_edges(
+        "research_panel",
+        should_run_analysis_after_research,
+        {
+            "analysis": "analyst_panel",
+            "build": "build_solution",
+        },
+    )
     graph.add_edge("analyst_panel", "build_solution")
     graph.add_edge("build_solution", "builder_completeness_gate")
     graph.add_conditional_edges(

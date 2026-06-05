@@ -141,13 +141,18 @@ class SwarmNodes:
         result = await self._run_agent(run_id, "supervisor", _with_memory(state, supervisor_input), "agent.supervisor")
         plan = result.parsed_json or {
             "research_needed": True,
+            "analysis_needed": True,
             "research_tasks": [{"title": "Research task", "instructions": state["user_input"]}],
             "preliminary_plan": [{"title": "Understand task", "instructions": state["user_input"]}],
             "analyst_task": {"title": "Analyze and specify", "instructions": state["user_input"]},
             "builder_task": {"title": "Build task", "instructions": state["user_input"]},
         }
+        plan.setdefault("research_needed", _infer_research_needed(state["user_input"], plan))
+        plan.setdefault("analysis_needed", _infer_analysis_needed(state["user_input"], plan))
+        topology = build_execution_topology(plan)
+        self.artifacts.record_execution_topology(run_id, topology)
         self.artifacts.update_agent(run_id, "supervisor", "completed", "Role workflow planned.")
-        update = {"plan": plan, "selected_agents": ["researcher", "builder", "reviewer"]}
+        update = {"plan": plan, "execution_topology": topology, "selected_agents": topology.get("agents", [])}
         self.artifacts.record_room_io(run_id, "supervisor", supervisor_input, plan, "Initial supervisor plan ready.")
         self._checkpoint(run_id, "supervisor_route", {**state, **update})
         return update
@@ -155,7 +160,8 @@ class SwarmNodes:
     async def research_panel(self, state: AgentState) -> AgentState:
         run_id = state["run_id"]
         if not (state.get("plan") or {}).get("research_needed", True):
-            update = {"research_result": {"skipped": True, "summary": "Supervisor skipped research."}}
+            update = {"research_result": {"skipped": True, "summary": "Supervisor skipped research.", "claims": []}, "claims": []}
+            self.artifacts.record_claims(run_id, [])
             self.artifacts.record_room_io(run_id, "researcher", state.get("plan"), update["research_result"], "Research skipped.")
             self._checkpoint(run_id, "research_panel", {**state, **update})
             return update
@@ -180,8 +186,10 @@ class SwarmNodes:
             )
             panel_results.append({"agent": agent_name, "summary": metadata["summary"], "text": result.text[:2000]})
             artifacts.append(metadata)
-        research_result = {"panel": panel_results, "summary": "; ".join(item["summary"] for item in panel_results)}
-        update = {"research_result": research_result, "artifacts": artifacts}
+        claims = extract_grounding_claims(panel_results)
+        research_result = {"panel": panel_results, "summary": "; ".join(item["summary"] for item in panel_results), "claims": claims}
+        self.artifacts.record_claims(run_id, claims)
+        update = {"research_result": research_result, "claims": claims, "artifacts": artifacts}
         self.artifacts.record_room_io(run_id, "researcher", state.get("plan"), research_result, research_result["summary"])
         self._checkpoint(run_id, "research_panel", {**state, **update})
         return update
@@ -194,12 +202,14 @@ class SwarmNodes:
                 "user_request": state["user_input"],
                 "analysis": state.get("analysis"),
                 "research": state.get("research_result"),
+                "grounding_claims": state.get("claims") or (state.get("research_result") or {}).get("claims", []),
                 "plan": state.get("plan"),
                 "review_feedback": state.get("quality_result"),
                 "instruction": (
                     "Produce the requested deliverable itself. Do not return a meta-plan, checklist, or implementation notes as the primary output. "
                     "For Markdown/specification/planning tasks, write the complete Markdown document body with substantive sections and concrete TDD/BDD cases when requested. "
                     "For learning-based refinement tasks, incorporate the learning recommendations into the finished artifact and include a short 'Co poprawiono wedlug learningu' section."
+                    " Use only grounded domain claims from grounding_claims when making factual domain statements; if no claim exists, mark the fact as requiring verification."
                 ),
             },
             "Builder",
@@ -249,6 +259,7 @@ class SwarmNodes:
                     "analysis": state.get("analysis"),
                     "research": state.get("research_result"),
                     "build": state.get("build_result"),
+                    "grounding_claims": state.get("claims") or (state.get("research_result") or {}).get("claims", []),
                     "existing_artifacts": state.get("artifacts", []),
                     "stage_contract": (
                         "Review the current builder artifact as the candidate deliverable. "
@@ -335,6 +346,7 @@ class SwarmNodes:
                 "quality": state.get("quality_result"),
                 "supervisor_gate": state.get("supervisor_gate"),
                 "learning": state.get("learning_result"),
+                "grounding_claims": state.get("claims") or (state.get("research_result") or {}).get("claims", []),
                 "artifacts": state.get("artifacts", []),
                 "instruction": (
                     "Return only the final Markdown deliverable content. The system will save your response to final.md, so do not say that final.md is missing. "
@@ -381,9 +393,11 @@ class SwarmNodes:
         }
         result, metadata = await self._run_artifact_agent(state, "self_learner", payload, "Self-learning quality pass")
         learning_result = {"summary": metadata["summary"], "artifact_path": metadata["artifact_path"], "text": result.text[:3000]}
+        proposals = extract_learning_proposals(result.text)
+        self.artifacts.record_learning_proposals(run_id, proposals)
         if self.memory:
             self.memory.remember(run_id, "self_learner", result.text[:1200])
-        update = {"learning_result": learning_result, "artifacts": [*state.get("artifacts", []), metadata]}
+        update = {"learning_result": learning_result, "learning_proposals": proposals, "artifacts": [*state.get("artifacts", []), metadata]}
         self.artifacts.record_room_io(
             run_id,
             "learner",
@@ -463,12 +477,142 @@ def should_retry_review(state: AgentState, max_review_retries: int) -> str:
     return "final"
 
 
+def should_run_research(state: AgentState) -> str:
+    plan = state.get("plan") or {}
+    if bool(plan.get("research_needed", True)):
+        return "research"
+    if bool(plan.get("analysis_needed", True)):
+        return "analysis"
+    return "build"
+
+
+def should_run_analysis_after_research(state: AgentState) -> str:
+    plan = state.get("plan") or {}
+    return "analysis" if bool(plan.get("analysis_needed", True)) else "build"
+
+
 def should_retry_builder_completeness(state: AgentState, max_attempts: int) -> str:
     completeness = state.get("builder_completeness") or {}
     attempts = state.get("builder_attempts", 0)
     if completeness.get("status") == "needs_revision" and attempts <= max_attempts:
         return "retry"
     return "review"
+
+
+def build_execution_topology(plan: dict[str, Any]) -> dict[str, Any]:
+    research_needed = bool(plan.get("research_needed", True))
+    analysis_needed = bool(plan.get("analysis_needed", True))
+    stages = ["main", "supervisor"]
+    if research_needed:
+        stages.append("researcher")
+    if analysis_needed:
+        stages.append("analyst")
+    stages.extend(["builder", "reviewer", "learner", "main"])
+    edges = [
+        {"source": stages[index], "target": stages[index + 1], "status": "planned"}
+        for index in range(len(stages) - 1)
+    ]
+    agents_by_role = {
+        "main": ["main"],
+        "supervisor": ["supervisor"],
+        "researcher": RESEARCH_PANEL,
+        "analyst": ANALYST_PANEL,
+        "builder": ["builder"],
+        "reviewer": REVIEW_PANEL,
+        "learner": ["self_learner"],
+    }
+    agents = []
+    for stage in stages:
+        for agent in agents_by_role.get(stage, []):
+            if agent not in agents:
+                agents.append(agent)
+    return {
+        "mode": "dynamic",
+        "research_needed": research_needed,
+        "analysis_needed": analysis_needed,
+        "stages": stages,
+        "edges": edges,
+        "agents": agents,
+    }
+
+
+def extract_grounding_claims(panel_results: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    claims: list[dict[str, Any]] = []
+    for item in panel_results:
+        agent = str(item.get("agent") or "researcher")
+        text = str(item.get("text") or "")
+        for line in text.splitlines():
+            stripped = line.strip(" -\t")
+            if not stripped:
+                continue
+            lower = stripped.lower()
+            has_url = "http://" in stripped or "https://" in stripped
+            looks_like_claim = has_url or lower.startswith(("claim:", "fact:", "source:", "wniosek:", "fakt:"))
+            if not looks_like_claim:
+                continue
+            claims.append(
+                {
+                    "id": f"CLM-{len(claims) + 1:03d}",
+                    "claim": stripped[:600],
+                    "source": _first_url(stripped),
+                    "confidence": "medium" if has_url else "low",
+                    "agent": agent,
+                }
+            )
+            if len(claims) >= 40:
+                return claims
+    return claims
+
+
+def extract_learning_proposals(text: str) -> list[dict[str, Any]]:
+    proposals: list[dict[str, Any]] = []
+    for line in str(text or "").splitlines():
+        stripped = line.strip()
+        if not stripped.startswith(("-", "*")):
+            continue
+        body = stripped.lstrip("-* ").strip()
+        lower = body.lower()
+        target = "global"
+        if "builder" in lower:
+            target = "builder"
+        elif "reviewer" in lower or "review" in lower:
+            target = "reviewer"
+        elif "research" in lower:
+            target = "researcher"
+        elif "analyst" in lower:
+            target = "analyst_neutral"
+        action = "prompt_append" if "prompt" in lower or "instruction" in lower else "skill_add"
+        proposals.append(
+            {
+                "id": f"LRN-{len(proposals) + 1:03d}",
+                "target": target,
+                "action": action,
+                "recommendation": body[:500],
+                "status": "proposed",
+            }
+        )
+        if len(proposals) >= 12:
+            break
+    return proposals
+
+
+def _first_url(text: str) -> str | None:
+    for part in text.split():
+        if part.startswith(("http://", "https://")):
+            return part.rstrip(").,;")
+    return None
+
+
+def _infer_research_needed(user_request: str, plan: dict[str, Any]) -> bool:
+    text = f"{user_request} {json.dumps(plan, ensure_ascii=True)}".lower()
+    return any(term in text for term in ["research", "źród", "zrod", "sprawd", "lotto", "prawo", "regulamin", "aktual"])
+
+
+def _infer_analysis_needed(user_request: str, plan: dict[str, Any]) -> bool:
+    text = f"{user_request} {json.dumps(plan, ensure_ascii=True)}".lower()
+    if any(term in text for term in ["prosty", "quick", "tylko uruchom", "formatuj"]):
+        return False
+    return True
 
 
 def validate_builder_completeness(text: str, user_request: str) -> dict[str, Any]:

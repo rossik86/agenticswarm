@@ -65,6 +65,20 @@ The save action updates `configs/agents.yaml` in two places:
 
 You can reopen this configuration later from the left drawer, tab `Start`.
 
+Use `Sprawdź provider` before saving when you want to verify that the selected provider can actually start.
+
+## 4.1 Agent Presets
+
+Open the left drawer and choose `Presets` to tune the swarm for a work mode:
+
+- `coding`
+- `product_planning`
+- `research`
+- `security_review`
+- `docs_writer`
+
+A preset updates selected agent models, temperatures, and skill labels. It does not remove prompts or run history.
+
 ## 5. Run the First Task
 
 ```powershell
@@ -83,11 +97,19 @@ The final user-facing artifact is usually:
 workspace/runs/<run_id>/final.md
 ```
 
+Some runs also include:
+
+- `execution_topology.json` - dynamic DAG chosen by supervisor.
+- `claims.json` - grounded research claims.
+- `learning_proposals.json` - self-learner recommendations that can be approved in the GUI.
+
 ## 6. What to Inspect in the GUI
 
 - Town map: room status, active run flow, checkpoint progress.
 - Right drawer: selected room or agent, current run IO, artifacts, checkpoints, timeline.
 - Left drawer: agents, skills, MCP resources, templates, versions, run diff, and Start configuration.
+- Left drawer Presets tab: apply a prepared role/model/skill setup.
+- Main room panel: dynamic topology, grounding claims, and learner proposals for the selected run.
 - Top-right run picker: previous runs with filters by text, status, and date.
 
 ## 7. Verification

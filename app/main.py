@@ -105,10 +105,11 @@ class SwarmApp:
             self.observability.emit(run_id, "run.failed", {"error": str(exc)})
             raise
 
-        self.artifacts.finish_run(run_id, "completed", final_answer=result.get("final_answer"))
+        final_status = determine_final_run_status(result)
+        self.artifacts.finish_run(run_id, final_status, final_answer=result.get("final_answer"))
         if self.memory and result.get("final_answer"):
             self.memory.remember(run_id, "main", str(result["final_answer"]))
-        self.observability.emit(run_id, "run.completed", {"final_answer": result.get("final_answer")})
+        self.observability.emit(run_id, f"run.{final_status}", {"final_answer": result.get("final_answer")})
         self.observability.emit(
             run_id,
             "main.notified",
@@ -130,3 +131,16 @@ class SwarmApp:
             }
             for name, agent in self.config.agents.items()
         }
+
+
+def determine_final_run_status(result: AgentState) -> str:
+    for key in ("quality_result", "supervisor_gate", "review_result"):
+        value = result.get(key)
+        if isinstance(value, dict) and str(value.get("status") or "").lower() == "needs_revision":
+            return "needs_revision"
+    learning = result.get("learning_result")
+    if isinstance(learning, dict):
+        combined = " ".join(str(learning.get(key) or "") for key in ("summary", "text")).lower()
+        if "needs_revision" in combined or "needs revision" in combined:
+            return "needs_revision"
+    return "completed"

@@ -1070,6 +1070,69 @@ button {
   opacity: 0.58;
 }
 
+.topology-panel,
+.claims-panel,
+.learning-proposals-panel {
+  display: grid;
+  gap: 8px;
+}
+
+.topology-stages {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.topology-stages span {
+  padding: 3px 6px;
+  border: 1px solid #cbd8e5;
+  border-radius: 999px;
+  background: #eef4fa;
+  color: #223044;
+  font-size: 11px;
+  font-weight: 750;
+}
+
+.claims-list,
+.proposal-list {
+  display: grid;
+  gap: 6px;
+}
+
+.claims-list button,
+.proposal-list label {
+  display: grid;
+  gap: 2px;
+  width: 100%;
+  padding: 8px;
+  border: 1px solid #d3dde8;
+  border-radius: 6px;
+  background: #fff;
+  color: #172433;
+  text-align: left;
+}
+
+.claims-list span,
+.proposal-list span {
+  overflow-wrap: anywhere;
+  font-size: 12px;
+}
+
+.claims-list small,
+.proposal-list small {
+  color: #66768a;
+  font-size: 11px;
+}
+
+.proposal-list label {
+  grid-template-columns: auto 1fr;
+  align-items: start;
+}
+
+.proposal-list input {
+  margin-top: 3px;
+}
+
 .panel-section {
   margin-top: 16px;
 }
@@ -1907,6 +1970,40 @@ button {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
+}
+
+.health-result {
+  display: grid;
+  gap: 3px;
+  padding: 9px;
+  border: 1px solid #cbd8e5;
+  border-radius: 6px;
+  background: #eef4fa;
+}
+
+.health-result.ok {
+  border-color: rgba(47, 157, 88, 0.45);
+  background: #edf9f1;
+  color: #1b6536;
+}
+
+.health-result.failed {
+  border-color: rgba(200, 50, 43, 0.45);
+  background: #fff0ef;
+  color: #7b201a;
+}
+
+.health-result span {
+  overflow-wrap: anywhere;
+  font-size: 12px;
+}
+
+.preset-card {
+  gap: 6px;
+}
+
+.preset-card button {
+  justify-self: start;
 }
 
 .runtime-form {

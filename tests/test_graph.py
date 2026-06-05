@@ -7,7 +7,8 @@ from app.agents.runner import AgentRunResult
 from app.artifacts.manager import ArtifactManager
 from app.config.loader import load_config
 from app.graph.builder import build_graph
-from app.graph.nodes import ANALYST_PANEL, RESEARCH_PANEL, REVIEW_PANEL
+from app.graph.nodes import ANALYST_PANEL, RESEARCH_PANEL, REVIEW_PANEL, extract_grounding_claims, extract_learning_proposals
+from app.main import determine_final_run_status
 
 
 class FakeRunner:
@@ -38,6 +39,17 @@ class FakeRunner:
                 parsed_json={"questions": [], "specification": "Spec", "risks": [], "recommendation": "Proceed"},
             )
         return AgentRunResult(text=f"# {agent_name}\nDone.", parsed_json=None)
+
+
+class NoResearchRunner(FakeRunner):
+    async def run(self, agent_name: str, input_text: str) -> AgentRunResult:
+        if agent_name == "supervisor":
+            self.calls.append((agent_name, input_text))
+            return AgentRunResult(
+                text='{"research_needed": false, "analysis_needed": false, "builder_task": {"title": "Build", "instructions": "Do it"}}',
+                parsed_json={"research_needed": False, "analysis_needed": False, "builder_task": {"title": "Build", "instructions": "Do it"}},
+            )
+        return await super().run(agent_name, input_text)
 
 
 def test_graph_writes_specialist_and_review_artifacts(tmp_path: Path) -> None:
@@ -112,10 +124,64 @@ def test_graph_routes_supervisor_before_analyst_and_records_room_io(tmp_path: Pa
     assert "system will save your response to final.md" in final_main_call
 
 
+def test_dynamic_topology_can_skip_research_and_analysis(tmp_path: Path) -> None:
+    project_root = Path(__file__).resolve().parents[1]
+    config = load_config(project_root / "configs" / "agents.yaml")
+    config.artifact_root = Path("runs")
+    artifacts = ArtifactManager(tmp_path, config.artifact_root)
+    artifacts.start_run("dynamic-run", "Simple format task", list(config.agents))
+    runner = NoResearchRunner()
+    graph = build_graph(project_root, config, runner, artifacts)
+    initial_state = {
+        "run_id": "dynamic-run",
+        "user_input": "Simple format task",
+        "memory_context": "",
+        "messages": [{"role": "user", "content": "Simple format task"}],
+        "artifacts": [],
+        "specialist_results": [],
+        "errors": [],
+        "review_attempts": 0,
+    }
+
+    result = asyncio.run(graph.ainvoke(initial_state))
+    calls = [agent for agent, _ in runner.calls]
+    status = artifacts.read_status("dynamic-run")
+
+    assert "researcher" not in calls
+    assert "analyst_neutral" not in calls
+    assert "builder" in calls
+    assert result["execution_topology"]["stages"] == ["main", "supervisor", "builder", "reviewer", "learner", "main"]
+    assert status["execution_topology"]["mode"] == "dynamic"
+
+
 def test_council_order_uses_neutral_as_final_arbiter() -> None:
     assert ANALYST_PANEL == ["analyst_positive", "analyst_negative", "analyst_neutral"]
     assert RESEARCH_PANEL == ["researcher_negative", "researcher"]
     assert REVIEW_PANEL == ["reviewer_positive", "reviewer_negative", "reviewer"]
+
+
+def test_grounding_claims_and_learning_proposals_are_structured() -> None:
+    claims = extract_grounding_claims(
+        [
+            {
+                "agent": "researcher",
+                "text": "- Claim: Lotto uses official rules from https://example.com/rules",
+            }
+        ]
+    )
+    proposals = extract_learning_proposals("- Builder prompt should require source mapping.\n- Reviewer should enforce grounding.")
+
+    assert claims[0]["id"] == "CLM-001"
+    assert claims[0]["source"] == "https://example.com/rules"
+    assert proposals[0]["target"] == "builder"
+    assert proposals[0]["action"] == "prompt_append"
+
+
+def test_final_run_status_blocks_completed_when_revision_is_required() -> None:
+    assert determine_final_run_status({"quality_result": {"status": "needs_revision"}}) == "needs_revision"
+    assert determine_final_run_status({"supervisor_gate": {"status": "needs_revision"}}) == "needs_revision"
+    assert determine_final_run_status({"learning_result": {"summary": "Quality decision: needs_revision"}}) == "needs_revision"
+    assert determine_final_run_status({"quality_result": {"status": "accepted"}}) == "completed"
 
 
 def test_async_acceptance_skips_blocking_main_decision(tmp_path: Path) -> None:

@@ -16,6 +16,12 @@ LangGraph is used as the orchestration layer. Agents can run through OpenAI Agen
 - Global configuration drawer for agents, skills, MCP resources, templates, versions, and run diffs.
 - Welcome configuration GUI for new users: set provider and model once and apply them to all agents.
 - Provider support: `agents_sdk`, `codex_cli`, `openhands`, and `copilot`.
+- Provider health checks from the GUI before committing a provider/model setup.
+- Agent presets for common work modes: coding, product planning, research, security review, and docs writer.
+- `needs_revision` run status when review, supervisor gate, or learner feedback blocks clean completion.
+- Dynamic execution topology: supervisor can skip research or analysis for simpler tasks and writes the per-run DAG to `execution_topology.json`.
+- Knowledge grounding: researcher outputs are converted into structured claims in `claims.json` and passed to builder/reviewer.
+- Evaluator-optimizer loop: self-learner produces structured proposals that can be approved from the GUI and applied to prompts/skills.
 
 ## Shape
 
@@ -142,6 +148,14 @@ The fastest way to configure all agents is the welcome GUI:
 3. Use the welcome modal or the left drawer tab `Start`.
 4. Choose provider and model.
 5. Save to apply the selection to every agent at once.
+
+Use `Sprawdź provider` in the same screen to verify the selected provider before saving. Use the left drawer tab `Presets` to apply a role/model/skill setup for a specific kind of work.
+
+Run artifacts can also include:
+
+- `execution_topology.json` - planned dynamic route for the run.
+- `claims.json` - grounded claims extracted from research.
+- `learning_proposals.json` - self-learner proposals available for user approval.
 
 ## Artifacts
 

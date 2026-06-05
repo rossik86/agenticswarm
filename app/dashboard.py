@@ -7,8 +7,10 @@ import html
 import json
 import mimetypes
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import os
 from pathlib import Path
 import sqlite3
+import subprocess
 import threading
 from urllib.parse import parse_qs, quote, urlparse
 from zoneinfo import ZoneInfo
@@ -76,6 +78,9 @@ def serve_dashboard(project_root: Path, config_path: Path, host: str = "127.0.0.
             if parsed.path == "/templates.json":
                 self._send_json(read_task_templates(project_root))
                 return
+            if parsed.path == "/presets.json":
+                self._send_json({"presets": read_agent_presets()})
+                return
             if parsed.path == "/versions.json":
                 self._send_json({"versions": read_prompt_versions(project_root)})
                 return
@@ -136,6 +141,19 @@ def serve_dashboard(project_root: Path, config_path: Path, host: str = "127.0.0.
                     result["onboarding"] = read_onboarding(project_root, config)
                 self._send_json(result)
                 return
+            if parsed.path == "/provider-health.json":
+                payload = self._read_json_body()
+                provider = str(payload.get("provider") or "")
+                model = str(payload.get("model") or "")
+                self._send_json(check_provider_health(project_root, config, provider, model))
+                return
+            if parsed.path == "/presets.json":
+                payload = self._read_json_body()
+                result = apply_agent_preset(project_root, config_path, str(payload.get("preset") or ""))
+                if result.get("updated"):
+                    config = load_config(config_path)
+                self._send_json(result)
+                return
             if parsed.path == "/learning/improve":
                 payload = self._read_json_body()
                 result = prepare_learning_improvement(project_root, artifact_root, str(payload.get("run_id") or ""))
@@ -144,6 +162,13 @@ def serve_dashboard(project_root: Path, config_path: Path, host: str = "127.0.0.
             if parsed.path == "/learning/apply":
                 payload = self._read_json_body()
                 result = apply_learning_actions(project_root, config_path, payload)
+                if result.get("updated"):
+                    config = load_config(config_path)
+                self._send_json(result)
+                return
+            if parsed.path == "/learning/proposals/apply":
+                payload = self._read_json_body()
+                result = apply_learning_proposals(project_root, config_path, artifact_root, payload)
                 if result.get("updated"):
                     config = load_config(config_path)
                 self._send_json(result)
@@ -525,6 +550,116 @@ def apply_welcome_configuration(project_root: Path, config_path: Path, payload: 
     }
 
 
+def check_provider_health(project_root: Path, config: object, provider: str, model: str = "") -> dict[str, object]:
+    provider = str(provider or "").strip()
+    if provider not in _provider_options():
+        return {"ok": False, "provider": provider, "message": "Nieobsługiwany provider."}
+    if provider == "agents_sdk":
+        try:
+            __import__("agents")
+        except ImportError:
+            return {"ok": False, "provider": provider, "message": "Brak pakietu OpenAI Agents SDK."}
+        if not os.environ.get("OPENAI_API_KEY"):
+            return {"ok": False, "provider": provider, "message": "Brak OPENAI_API_KEY."}
+        return {"ok": True, "provider": provider, "model": model, "message": "Agents SDK dostępny."}
+
+    cli_config = getattr(config, provider, None)
+    if not cli_config:
+        return {"ok": False, "provider": provider, "message": "Brak konfiguracji providera."}
+    command = str(getattr(cli_config, "command", ""))
+    args = [str(item) for item in getattr(cli_config, "args", [])]
+    timeout = min(int(getattr(cli_config, "timeout_seconds", 30) or 30), 30)
+    prompt = f"Health check for provider {provider}, model {model or '-'}."
+    try:
+        completed = subprocess.run(
+            [command, *args],
+            cwd=str(project_root),
+            input=prompt,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=False,
+        )
+    except FileNotFoundError:
+        return {"ok": False, "provider": provider, "message": f"Nie znaleziono komendy: {command}"}
+    except subprocess.TimeoutExpired:
+        return {"ok": False, "provider": provider, "message": f"Health check przekroczył {timeout}s."}
+    output = (completed.stdout or completed.stderr or "").strip()
+    return {
+        "ok": completed.returncode == 0,
+        "provider": provider,
+        "model": model,
+        "exit_code": completed.returncode,
+        "message": "Provider działa." if completed.returncode == 0 else "Provider zwrócił błąd.",
+        "output": _clip_middle(output, 1200),
+    }
+
+
+def read_agent_presets() -> list[dict[str, object]]:
+    return [
+        {
+            "id": "coding",
+            "name": "Coding",
+            "description": "Builder-heavy setup for implementation tasks with strict review.",
+        },
+        {
+            "id": "product_planning",
+            "name": "Product planning",
+            "description": "Balanced planning setup for specs, UX, requirements, and BDD scenarios.",
+        },
+        {
+            "id": "research",
+            "name": "Research",
+            "description": "Researcher-first setup with stronger source validation.",
+        },
+        {
+            "id": "security_review",
+            "name": "Security review",
+            "description": "Adversarial quality/security setup for reviewing risky changes.",
+        },
+        {
+            "id": "docs_writer",
+            "name": "Docs writer",
+            "description": "Documentation-focused setup for clear artifacts and handoffs.",
+        },
+    ]
+
+
+def apply_agent_preset(project_root: Path, config_path: Path, preset_id: str) -> dict[str, object]:
+    presets = _agent_preset_definitions()
+    preset = presets.get(str(preset_id or "").strip())
+    if not preset:
+        return {"updated": False, "message": "Nie znaleziono presetu."}
+    raw = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+    agents = raw.get("agents")
+    if not isinstance(agents, dict):
+        return {"updated": False, "message": "Niepoprawna sekcja agents."}
+    changed = 0
+    for agent_name, updates in preset.get("agents", {}).items():
+        agent = agents.get(agent_name)
+        if not isinstance(agent, dict):
+            continue
+        for key in ("model", "temperature", "description"):
+            if key in updates:
+                agent[key] = updates[key]
+        if "skills_add" in updates:
+            skills = list(agent.get("skills") or [])
+            for skill in updates["skills_add"]:
+                if skill not in skills:
+                    skills.append(skill)
+            agent["skills"] = skills
+        changed += 1
+    raw.setdefault("defaults", {})["model"] = preset.get("default_model", raw.get("defaults", {}).get("model", "gpt-5.4-mini"))
+    config_path.write_text(yaml.safe_dump(raw, sort_keys=False, allow_unicode=False), encoding="utf-8")
+    load_config(config_path)
+    action = append_checkpoint_action(
+        project_root / "workspace" / "preset_actions.jsonl",
+        "preset_applied",
+        {"preset": preset_id, "changed_agents": changed},
+    )
+    return {"updated": True, "message": f"Preset {preset_id} zastosowany dla {changed} agentów.", "action_id": action["id"]}
+
+
 def read_global_resources(project_root: Path, config: object) -> dict[str, object]:
     skill_root = project_root / "skills"
     skills = []
@@ -687,6 +822,42 @@ def apply_learning_actions(project_root: Path, config_path: Path, payload: dict[
         "applied": applied,
         "errors": errors,
     }
+
+
+def apply_learning_proposals(project_root: Path, config_path: Path, artifact_root: Path, payload: dict[str, object]) -> dict[str, object]:
+    run_id = str(payload.get("run_id") or "").strip()
+    proposal_ids = {str(item) for item in payload.get("proposal_ids", []) if str(item)}
+    if not run_id:
+        return {"updated": False, "message": "Brak run_id."}
+    status = read_status(artifact_root, run_id)
+    proposals = status.get("learning_proposals") if isinstance(status, dict) else []
+    if not isinstance(proposals, list):
+        proposals = []
+    selected = [proposal for proposal in proposals if isinstance(proposal, dict) and str(proposal.get("id")) in proposal_ids]
+    if not selected:
+        return {"updated": False, "message": "Brak wybranych propozycji."}
+    config = load_config(config_path)
+    actions = []
+    for proposal in selected:
+        action = str(proposal.get("action") or "")
+        target = str(proposal.get("target") or "global")
+        recommendation = str(proposal.get("recommendation") or "")
+        if action == "prompt_append" and target in config.agents:
+            actions.append({"type": "prompt_append", "target": target, "content": recommendation})
+        elif action == "skill_add" and target in config.agents:
+            words = [_resource_name(word) for word in recommendation.split()]
+            skill_name = next((word for word in words if word), "learning_guardrail")
+            actions.append({"type": "agent_skill_add", "target": target, "content": skill_name})
+        else:
+            actions.append({"type": "skill_create", "target": "learning_guardrail", "content": f"# Learning guardrail\n\n{recommendation}"})
+    result = apply_learning_actions(project_root, config_path, {"source_run_id": run_id, "actions": actions})
+    if result.get("updated"):
+        append_checkpoint_action(
+            project_root / "workspace" / "learning_proposal_actions.jsonl",
+            "learning_proposals_applied",
+            {"run_id": run_id, "proposal_ids": sorted(proposal_ids), "applied": result.get("applied", [])},
+        )
+    return result
 
 
 def read_prompt_versions(project_root: Path) -> list[dict[str, object]]:
@@ -1041,6 +1212,53 @@ def model_options_for_provider(provider: str) -> list[str]:
 
 def _provider_options() -> tuple[str, ...]:
     return ("agents_sdk", "codex_cli", "openhands", "copilot")
+
+
+def _agent_preset_definitions() -> dict[str, dict[str, object]]:
+    return {
+        "coding": {
+            "default_model": "gpt-5.4-mini",
+            "agents": {
+                "builder": {"model": "gpt-5.5", "temperature": 0.1, "skills_add": ["implementation", "test_driven_development"]},
+                "reviewer_negative": {"model": "gpt-5.5", "temperature": 0.1, "skills_add": ["security_review", "quality_gate"]},
+                "self_learner": {"model": "gpt-5.5", "temperature": 0.1, "skills_add": ["flow_improvement"]},
+            },
+        },
+        "product_planning": {
+            "default_model": "gpt-5.4-mini",
+            "agents": {
+                "analyst_neutral": {"model": "gpt-5.5", "temperature": 0.2, "skills_add": ["requirements", "bdd"]},
+                "analyst_negative": {"model": "gpt-5.4", "temperature": 0.1, "skills_add": ["scope_control"]},
+                "builder": {"model": "gpt-5.4-mini", "temperature": 0.2, "skills_add": ["product_specification"]},
+            },
+        },
+        "research": {
+            "default_model": "gpt-5.4-mini",
+            "agents": {
+                "researcher": {"model": "gpt-5.5", "temperature": 0.1, "skills_add": ["source_mapping", "fact_checking"]},
+                "researcher_negative": {"model": "gpt-5.5", "temperature": 0.1, "skills_add": ["source_validation", "completeness_check"]},
+                "analyst_neutral": {"model": "gpt-5.4", "temperature": 0.2, "skills_add": ["research_synthesis"]},
+            },
+        },
+        "security_review": {
+            "default_model": "gpt-5.4-mini",
+            "agents": {
+                "reviewer_negative": {"model": "gpt-5.5", "temperature": 0.0, "skills_add": ["security_review", "threat_modeling"]},
+                "reviewer": {"model": "gpt-5.5", "temperature": 0.1, "skills_add": ["quality_control", "acceptance_gate"]},
+                "builder": {"model": "gpt-5.4-mini", "temperature": 0.1, "skills_add": ["secure_implementation"]},
+                "self_learner": {"model": "gpt-5.5", "temperature": 0.1, "skills_add": ["security_learning"]},
+            },
+        },
+        "docs_writer": {
+            "default_model": "gpt-5.4-mini",
+            "agents": {
+                "analyst_neutral": {"model": "gpt-5.4", "temperature": 0.2, "skills_add": ["information_architecture"]},
+                "builder": {"model": "gpt-5.4", "temperature": 0.2, "skills_add": ["documentation", "markdown_writer"]},
+                "reviewer_positive": {"model": "gpt-5.4", "temperature": 0.1, "skills_add": ["clarity_review"]},
+                "reviewer_negative": {"model": "gpt-5.4", "temperature": 0.1, "skills_add": ["ambiguity_review"]},
+            },
+        },
+    }
 
 
 def _path_timestamp(path: Path) -> str:

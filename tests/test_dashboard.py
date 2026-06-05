@@ -8,6 +8,7 @@ from app.dashboard import (
     append_checkpoint_action,
     append_town_action,
     apply_learning_actions,
+    apply_learning_proposals,
     build_checkpoint_prompt,
     read_checkpoint,
     read_checkpoints,
@@ -24,9 +25,12 @@ from app.dashboard import (
     render_dashboard,
     render_town,
     build_learning_improvement_prompt,
+    check_provider_health,
     read_onboarding,
+    read_agent_presets,
     mark_latest_background_failure,
     prepare_learning_improvement,
+    apply_agent_preset,
     apply_welcome_configuration,
     update_task_template,
     update_agent_runtime_settings,
@@ -204,6 +208,40 @@ def test_welcome_configuration_applies_provider_and_model_to_all_agents(tmp_path
     assert onboarding["provider"] == "copilot"
 
 
+def test_provider_health_check_uses_configured_subprocess(tmp_path: Path) -> None:
+    project_root = Path(__file__).resolve().parents[1]
+    config_path = tmp_path / "configs" / "agents.yaml"
+    config_path.parent.mkdir(parents=True)
+    config_path.write_text((project_root / "configs" / "agents.yaml").read_text(encoding="utf-8"), encoding="utf-8")
+    raw = config_path.read_text(encoding="utf-8").replace("command: codex", f"command: {Path(__import__('sys').executable).as_posix()}", 1)
+    raw = raw.replace("    - exec\n    - --skip-git-repo-check\n    - --color\n    - never\n    - \"-\"", "    - -c\n    - \"import sys; data=sys.stdin.read(); print('health ok')\"", 1)
+    config_path.write_text(raw, encoding="utf-8")
+    config = load_config(config_path)
+
+    result = check_provider_health(tmp_path, config, "codex_cli", "gpt-5.4-mini")
+
+    assert result["ok"] is True
+    assert result["provider"] == "codex_cli"
+    assert "health ok" in result["output"]
+
+
+def test_agent_preset_applies_models_temperature_and_skills(tmp_path: Path) -> None:
+    project_root = Path(__file__).resolve().parents[1]
+    config_path = tmp_path / "configs" / "agents.yaml"
+    config_path.parent.mkdir(parents=True)
+    config_path.write_text((project_root / "configs" / "agents.yaml").read_text(encoding="utf-8"), encoding="utf-8")
+
+    result = apply_agent_preset(tmp_path, config_path, "security_review")
+    config = load_config(config_path)
+    presets = read_agent_presets()
+
+    assert result["updated"] is True
+    assert any(preset["id"] == "security_review" for preset in presets)
+    assert config.agents["reviewer_negative"].model == "gpt-5.5"
+    assert "security_review" in config.agents["reviewer_negative"].skills
+    assert config.agents["builder"].temperature == 0.1
+
+
 def test_dashboard_global_skill_and_mcp_crud(tmp_path: Path) -> None:
     project_root = Path(__file__).resolve().parents[1]
     config_path = tmp_path / "configs" / "agents.yaml"
@@ -331,6 +369,26 @@ def test_learning_actions_apply_selected_prompt_and_skill_changes(tmp_path: Path
     assert result["updated"] is True
     assert "Output final artifact only." in (tmp_path / "prompts" / "builder.md").read_text(encoding="utf-8")
     assert (tmp_path / "skills" / "artifact_completeness.md").exists()
+
+
+def test_learning_proposals_apply_selected_items(tmp_path: Path) -> None:
+    project_root = Path(__file__).resolve().parents[1]
+    config_path = tmp_path / "configs" / "agents.yaml"
+    config_path.parent.mkdir(parents=True)
+    config_path.write_text((project_root / "configs" / "agents.yaml").read_text(encoding="utf-8"), encoding="utf-8")
+    (tmp_path / "prompts").mkdir()
+    (tmp_path / "prompts" / "builder.md").write_text("old prompt", encoding="utf-8")
+    manager = ArtifactManager(tmp_path, Path("runs"))
+    manager.start_run("run-1", "Input", ["builder"])
+    manager.record_learning_proposals(
+        "run-1",
+        [{"id": "LRN-001", "target": "builder", "action": "prompt_append", "recommendation": "Require source map."}],
+    )
+
+    result = apply_learning_proposals(tmp_path, config_path, tmp_path / "runs", {"run_id": "run-1", "proposal_ids": ["LRN-001"]})
+
+    assert result["updated"] is True
+    assert "Require source map" in (tmp_path / "prompts" / "builder.md").read_text(encoding="utf-8")
 
 
 def test_builder_completeness_gate_rejects_meta_plan_and_accepts_spec() -> None:
