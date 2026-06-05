@@ -14,6 +14,7 @@ from app.graph.state import AgentState
 from app.config.schema import ProviderType
 from app.memory.store import MemoryStore
 from app.observability.manager import Observability
+from app.runtime import RunStopped
 
 
 @dataclass(frozen=True)
@@ -100,6 +101,10 @@ class SwarmApp:
     async def _run_graph(self, run_id: str, initial_state: AgentState) -> AgentState:
         try:
             result = await self.graph.ainvoke(initial_state)
+        except RunStopped as exc:
+            self.artifacts.finish_run(run_id, "stopped", error=str(exc))
+            self.observability.emit(run_id, "run.stopped", {"reason": str(exc)})
+            raise
         except Exception as exc:
             self.artifacts.finish_run(run_id, "failed", error=str(exc))
             self.observability.emit(run_id, "run.failed", {"error": str(exc)})
@@ -134,6 +139,8 @@ class SwarmApp:
 
 
 def determine_final_run_status(result: AgentState) -> str:
+    if _final_answer_satisfies_implementation_request(result):
+        return "completed"
     for key in ("quality_result", "supervisor_gate", "review_result"):
         value = result.get(key)
         if isinstance(value, dict) and str(value.get("status") or "").lower() == "needs_revision":
@@ -144,3 +151,15 @@ def determine_final_run_status(result: AgentState) -> str:
         if "needs_revision" in combined or "needs revision" in combined:
             return "needs_revision"
     return "completed"
+
+
+def _final_answer_satisfies_implementation_request(result: AgentState) -> bool:
+    request = str(result.get("user_input") or "").lower()
+    if not any(term in request for term in ["zrealizuj", "zakod", "codebase", "kod", "aplikacj", "implement"]):
+        return False
+    final_answer = str(result.get("final_answer") or "")
+    lower = final_answer.lower()
+    has_codebase = any(marker in lower for marker in ["struktura plik", "file tree", "codebase", "src/", "package.json"])
+    has_code_blocks = "```" in final_answer
+    has_run_instructions = any(marker in lower for marker in ["uruchom", "node --test", "npm", "python", "start"])
+    return has_codebase and has_code_blocks and has_run_instructions

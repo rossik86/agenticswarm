@@ -223,6 +223,16 @@ class ArtifactManager:
         self._write_json_artifact(run_id, "learning_proposals.json", {"proposals": proposals})
         self._write_status(run_id, data)
 
+    def stop_requested(self, run_id: str) -> bool:
+        return (self.run_dir(run_id) / "stop_requested.json").exists()
+
+    def request_stop(self, run_id: str, reason: str = "Run stopped.") -> None:
+        now = _timestamp()
+        atomic_write_text(
+            self.run_dir(run_id) / "stop_requested.json",
+            json.dumps({"run_id": run_id, "reason": reason, "created_at": now}, ensure_ascii=True, indent=2) + "\n",
+        )
+
     def finish_run(
         self,
         run_id: str,

@@ -14,7 +14,9 @@ For specification/document tasks:
 - include a short "Co poprawiono wedlug learningu" section when the task is a learning-based refinement
 
 For code tasks:
-- implement or describe the exact code artifact requested
-- include exact files/components changed
+- implement the exact code artifact requested; do not stop at a plan
+- include a complete codebase section with file tree and fenced code blocks for every essential file
+- include exact files/components changed or created
 - include tests or BDD scenarios and verification result
+- include exact run instructions
 - list remaining risks only after the actual deliverable content

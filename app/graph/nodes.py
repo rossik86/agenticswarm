@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import json
 from pathlib import Path
 from typing import Any
@@ -12,6 +14,7 @@ from app.config.schema import SwarmConfig
 from app.graph.state import AgentState
 from app.memory.store import MemoryStore
 from app.observability.manager import Observability
+from app.runtime import RunStopped
 
 
 ANALYST_PANEL = ["analyst_positive", "analyst_negative", "analyst_neutral"]
@@ -440,12 +443,25 @@ class SwarmNodes:
         return result, metadata
 
     async def _run_agent(self, run_id: str, agent_name: str, input_text: str, span_name: str):
+        if self.artifacts.stop_requested(run_id):
+            raise RunStopped(f"Run {run_id} stopped before agent {agent_name}.")
         try:
             with self._span(run_id, span_name, {"agent": agent_name}):
-                result = await self.runner.run(agent_name, input_text)
+                task = asyncio.create_task(self.runner.run(agent_name, input_text))
+                while not task.done():
+                    if self.artifacts.stop_requested(run_id):
+                        task.cancel()
+                        with contextlib.suppress(asyncio.CancelledError):
+                            await task
+                        raise RunStopped(f"Run {run_id} stopped during agent {agent_name}.")
+                    await asyncio.sleep(1)
+                result = await task
                 if result.token_usage:
                     self.artifacts.record_agent_usage(run_id, agent_name, result.token_usage)
                 return result
+        except RunStopped:
+            self.artifacts.update_agent(run_id, agent_name, "stopped", "Run stopped by user.")
+            raise
         except Exception as exc:
             self.artifacts.update_agent(run_id, agent_name, "failed", error=str(exc))
             raise
@@ -648,9 +664,18 @@ def validate_builder_completeness(text: str, user_request: str) -> dict[str, Any
     lower = body.lower()
     issues: list[str] = []
     wants_spec = any(term in request for term in ["spec", "specyfik", "markdown", "plan aplikacji", "tdd", "bdd"])
+    wants_implementation = any(term in request for term in ["zrealizuj", "zakod", "codebase", "kod", "aplikacj", "implement"])
     meta_markers = ["build objective", "implementation steps", "files or components", "remaining risks", "verification result"]
     if any(marker in lower for marker in meta_markers):
         issues.append("builder output looks like a meta-plan instead of the requested deliverable")
+    if wants_implementation:
+        has_file_tree = any(marker in lower for marker in ["struktura plik", "file tree", "codebase", "src/", "app.", "package.json"])
+        has_code_fence = "```" in body
+        has_run_instruction = any(marker in lower for marker in ["uruchom", "run", "npm", "python", "start"])
+        if not has_file_tree or not has_code_fence:
+            issues.append("implementation request requires a concrete codebase with file structure and code blocks")
+        if not has_run_instruction:
+            issues.append("implementation request requires run instructions")
     if wants_spec:
         headings = body.count("\n## ") + (1 if body.startswith("## ") else 0)
         if len(body) < 4500:

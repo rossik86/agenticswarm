@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import sys
 from pathlib import Path
 
 from app.dashboard import serve_dashboard
@@ -35,6 +36,8 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 async def async_main(argv: list[str] | None = None) -> int:
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     project_root = Path(__file__).resolve().parents[1]
     args = build_parser().parse_args(argv)
     config_path = Path(args.config)
