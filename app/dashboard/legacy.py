@@ -17,6 +17,7 @@ from zoneinfo import ZoneInfo
 
 import yaml
 
+from app.agents.providers.codex_cli import build_codex_args, resolve_command
 from app.agents.runner import load_skill_markdowns
 from app.config.loader import load_config
 from app.io.atomic import atomic_write_text
@@ -173,6 +174,12 @@ def serve_dashboard(project_root: Path, config_path: Path, host: str = "127.0.0.
                 if result.get("updated"):
                     config = load_config(config_path)
                 self._send_json(result)
+                return
+            if parsed.path == "/run/stop":
+                payload = self._read_json_body()
+                run_id = str(payload.get("run_id") or latest_run_id(artifact_root) or "")
+                reason = str(payload.get("reason") or "Run stopped from dashboard.")
+                self._send_json(stop_running_run(artifact_root, run_id, reason))
                 return
             if parsed.path == "/versions/rollback":
                 payload = self._read_json_body()
@@ -376,6 +383,37 @@ def read_runs(artifact_root: Path, limit: int = 80) -> list[dict[str, object]]:
     return runs
 
 
+def stop_running_run(artifact_root: Path, run_id: str, reason: str = "Run stopped.") -> dict[str, object]:
+    run_id = str(run_id or "").strip()
+    if not run_id:
+        return {"accepted": False, "message": "Brak run_id do zatrzymania."}
+    status = read_status(artifact_root, run_id)
+    if status.get("status") not in {"running", "waiting"}:
+        return {"accepted": False, "run_id": run_id, "message": "Run nie jest aktywny."}
+    now = _timestamp()
+    status["status"] = "stopped"
+    status["updated_at"] = now
+    status["finished_at"] = now
+    status.setdefault("errors", []).append({"message": reason, "at": now, "type": "stopped"})
+    agents = status.get("agents")
+    if isinstance(agents, dict):
+        for agent in agents.values():
+            if isinstance(agent, dict) and agent.get("status") == "running":
+                agent["status"] = "stopped"
+                agent["finished_at"] = now
+                agent["error"] = reason
+                agent["summary"] = "Run stopped before this agent finished."
+    run_dir = artifact_root / run_id
+    body = json.dumps(status, ensure_ascii=True, indent=2) + "\n"
+    atomic_write_text(run_dir / "status.json", body)
+    atomic_write_text(artifact_root / "latest.json", body)
+    atomic_write_text(
+        run_dir / "stop_requested.json",
+        json.dumps({"run_id": run_id, "reason": reason, "created_at": now}, ensure_ascii=True, indent=2) + "\n",
+    )
+    return {"accepted": True, "run_id": run_id, "message": "Run zatrzymany. Aktywne wywołanie agenta przerwie się przy najbliższym checkpointcie."}
+
+
 def read_agent_settings(project_root: Path, config: object, agent_name: str) -> dict[str, object]:
     agents = getattr(config, "agents", {})
     agent = agents.get(agent_name) if isinstance(agents, dict) else None
@@ -567,8 +605,12 @@ def check_provider_health(project_root: Path, config: object, provider: str, mod
     cli_config = getattr(config, provider, None)
     if not cli_config:
         return {"ok": False, "provider": provider, "message": "Brak konfiguracji providera."}
-    command = str(getattr(cli_config, "command", ""))
+    command = resolve_command(str(getattr(cli_config, "command", "")))
     args = [str(item) for item in getattr(cli_config, "args", [])]
+    if provider == "codex_cli":
+        args = build_codex_args(command, args, model or None)
+        if Path(command).stem.lower() == "codex":
+            args = ["--version"]
     timeout = min(int(getattr(cli_config, "timeout_seconds", 30) or 30), 30)
     prompt = f"Health check for provider {provider}, model {model or '-'}."
     try:

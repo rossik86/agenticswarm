@@ -1,248 +1,251 @@
 defaults:
-  provider: agents_sdk
+  provider: codex_cli
   model: gpt-5.4-mini
   temperature: 0.2
-
 codex_cli:
   command: codex
   args:
-    - exec
-    - --skip-git-repo-check
-    - --color
-    - never
-    - "-"
+  - exec
+  - --skip-git-repo-check
+  - --color
+  - never
+  - '-'
   timeout_seconds: 900
-
 openhands:
   command: openhands
   args:
-    - "--help"
+  - --help
   timeout_seconds: 1800
-
 copilot:
   command: gh
   args:
-    - copilot
-    - suggest
-    - -t
-    - shell
+  - copilot
+  - suggest
+  - -t
+  - shell
   timeout_seconds: 900
-
 memory:
   backend: sqlite
   path: workspace/memory.sqlite
   max_context_items: 8
-
 checkpoint:
   path: workspace/checkpoints.sqlite
-
 observability:
   backend: local
   enabled: true
-
 artifact_root: workspace/runs
 max_review_retries: 1
-
 agents:
   main:
     type: main
     display_name: Main Communications Officer
-    description: Main conversational loop. Interprets user intent and returns final CLI answers.
+    description: Main conversational loop. Interprets user intent and returns final
+      CLI answers.
     skills:
-      - conversation
-      - delegation
-      - synthesis
+    - conversation
+    - delegation
+    - synthesis
     model: gpt-5.4-mini
     temperature: 0.2
     prompt: prompts/main.md
     tools: []
     delegates_to:
-      - supervisor
-
+    - supervisor
+    provider: codex_cli
   supervisor:
     type: supervisor
     display_name: Task Supervisor
     description: Breaks user requests into narrow specialist tasks.
     skills:
-      - planning
-      - routing
-      - task_decomposition
+    - planning
+    - routing
+    - task_decomposition
     model: gpt-5.4-mini
     temperature: 0.2
     prompt: prompts/supervisor.md
     tools:
-      - markdown_writer
+    - markdown_writer
     delegates_to:
-      - analyst_neutral
-      - analyst_positive
-      - analyst_negative
-      - researcher
-      - builder
-      - reviewer
-      - self_learner
-
+    - analyst_neutral
+    - analyst_positive
+    - analyst_negative
+    - researcher
+    - builder
+    - reviewer
+    - self_learner
+    provider: codex_cli
   analyst_neutral:
     type: specialist
     display_name: Neutral Analyst Arbiter
-    description: Neutral analyst. Clarifies intent, asks practical questions, and produces balanced analysis.
+    description: Neutral analyst. Clarifies intent, asks practical questions, and
+      produces balanced analysis.
     skills:
-      - analysis
-      - clarification
-      - specification
+    - analysis
+    - clarification
+    - specification
     model: gpt-5.4-mini
     temperature: 0.2
     prompt: prompts/analyst_neutral.md
     tools:
-      - markdown_writer
+    - markdown_writer
     output_artifact: analyst_neutral.md
-
+    provider: codex_cli
   analyst_positive:
     type: specialist
     display_name: Positive Analyst
-    description: Positive analyst. Finds strengths, opportunities, and approaches likely to work.
+    description: Positive analyst. Finds strengths, opportunities, and approaches
+      likely to work.
     skills:
-      - opportunity_analysis
-      - constructive_planning
-      - superpower
+    - opportunity_analysis
+    - constructive_planning
+    - superpower
     model: gpt-5.4-mini
     temperature: 0.2
     prompt: prompts/analyst_positive.md
     tools:
-      - markdown_writer
+    - markdown_writer
     output_artifact: analyst_positive.md
-
+    provider: codex_cli
   analyst_negative:
     type: specialist
     display_name: Negative Analyst
-    description: Negative analyst. Grills assumptions, finds holes, contradictions, and weak reasoning.
+    description: Negative analyst. Grills assumptions, finds holes, contradictions,
+      and weak reasoning.
     skills:
-      - grill_me
-      - risk_analysis
-      - adversarial_review
+    - grill_me
+    - risk_analysis
+    - adversarial_review
     model: gpt-5.4-mini
     temperature: 0.1
     prompt: prompts/analyst_negative.md
     tools:
-      - markdown_writer
+    - markdown_writer
     output_artifact: analyst_negative.md
-
+    provider: codex_cli
   researcher:
     type: specialist
     display_name: Neutral Researcher Arbiter
     description: Produces research, analysis, specifications, and decision notes.
     skills:
-      - research
-      - specification
-      - risk_analysis
+    - research
+    - specification
+    - risk_analysis
     model: gpt-5.4-mini
     temperature: 0.2
     prompt: prompts/researcher.md
     tools:
-      - markdown_writer
+    - markdown_writer
     output_artifact: researcher.md
-
+    provider: codex_cli
   researcher_negative:
     type: specialist
     display_name: Research Critic
-    description: Research critic. Challenges whether research is complete, current, and relevant.
+    description: Research critic. Challenges whether research is complete, current,
+      and relevant.
     skills:
-      - research_grilling
-      - source_validation
-      - completeness_check
+    - research_grilling
+    - source_validation
+    - completeness_check
     model: gpt-5.4-mini
     temperature: 0.1
     prompt: prompts/researcher_negative.md
     tools:
-      - markdown_writer
+    - markdown_writer
     output_artifact: researcher_negative.md
-
+    provider: codex_cli
   builder:
     type: specialist
     display_name: Builder
-    description: Builds the actual solution for the task. Uses available tools, UI/UX plugins, and implementation discipline.
+    description: Builds the actual solution for the task. Uses available tools, UI/UX
+      plugins, and implementation discipline.
     skills:
-      - implementation
-      - tdd_bdd
-      - ux_ui
-      - tool_use
+    - implementation
+    - tdd_bdd
+    - ux_ui
+    - tool_use
     model: gpt-5.4-mini
     temperature: 0.1
     prompt: prompts/builder.md
     tools:
-      - markdown_writer
+    - markdown_writer
     output_artifact: builder.md
-
+    provider: codex_cli
   reviewer:
     type: reviewer
     display_name: Neutral Review Arbiter
-    description: Neutral reviewer. Reviews artifacts and decides whether another pass is needed.
+    description: Neutral reviewer. Reviews artifacts and decides whether another pass
+      is needed.
     skills:
-      - review
-      - validation
-      - quality_control
+    - review
+    - validation
+    - quality_control
     model: gpt-5.4-mini
     temperature: 0.1
     prompt: prompts/reviewer.md
     tools:
-      - markdown_writer
+    - markdown_writer
     output_artifact: review.md
     validates:
-      - researcher
-      - builder
-
+    - researcher
+    - builder
+    provider: codex_cli
   reviewer_negative:
     type: reviewer
     display_name: Quality and Security Guardian
-    description: Quality and security guardian. Looks for correctness, safety, security, and maintainability failures.
+    description: Quality and security guardian. Looks for correctness, safety, security,
+      and maintainability failures.
     skills:
-      - quality_gate
-      - security_review
-      - adversarial_testing
+    - quality_gate
+    - security_review
+    - adversarial_testing
     model: gpt-5.4-mini
     temperature: 0.1
     prompt: prompts/reviewer_negative.md
     tools:
-      - markdown_writer
+    - markdown_writer
     output_artifact: review_negative.md
     validates:
-      - builder
-
+    - builder
+    provider: codex_cli
   reviewer_positive:
     type: reviewer
     display_name: Positive Quality Reviewer
-    description: Positive quality reviewer. Finds strong parts, language-specific good practices, and durable choices.
+    description: Positive quality reviewer. Finds strong parts, language-specific
+      good practices, and durable choices.
     skills:
-      - quality_superpowers
-      - programming_principles
-      - constructive_review
+    - quality_superpowers
+    - programming_principles
+    - constructive_review
     model: gpt-5.4-mini
     temperature: 0.1
     prompt: prompts/reviewer_positive.md
     tools:
-      - markdown_writer
+    - markdown_writer
     output_artifact: review_positive.md
     validates:
-      - builder
-
+    - builder
+    provider: codex_cli
   self_learner:
     type: specialist
     display_name: Self-Learning Quality Optimizer
-    description: Evaluator-optimizer agent. Reviews the whole run, every agent, room handoffs, and records reusable lessons to improve future runs.
+    description: Evaluator-optimizer agent. Reviews the whole run, every agent, room
+      handoffs, and records reusable lessons to improve future runs.
     skills:
-      - reflection
-      - evaluator_optimizer
-      - flow_improvement
-      - quality_control
-    model: gpt-5.5
+    - reflection
+    - evaluator_optimizer
+    - flow_improvement
+    - quality_control
+    model: gpt-5.4-mini
     temperature: 0.1
     prompt: prompts/self_learner.md
     tools:
-      - markdown_writer
+    - markdown_writer
     output_artifact: learning.md
     validates:
-      - main
-      - supervisor
-      - researcher
-      - analyst_neutral
-      - builder
-      - reviewer
+    - main
+    - supervisor
+    - researcher
+    - analyst_neutral
+    - builder
+    - reviewer
+    provider: codex_cli

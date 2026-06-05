@@ -43,10 +43,15 @@ class CodexCliProvider:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        stdout, stderr = await asyncio.wait_for(
-            process.communicate(full_prompt.encode("utf-8")),
-            timeout=cli_config.timeout_seconds,
-        )
+        try:
+            stdout, stderr = await asyncio.wait_for(
+                process.communicate(full_prompt.encode("utf-8")),
+                timeout=cli_config.timeout_seconds,
+            )
+        except asyncio.CancelledError:
+            process.kill()
+            await process.wait()
+            raise
         output = stdout.decode("utf-8", errors="replace").strip()
         error_output = stderr.decode("utf-8", errors="replace").strip()
         if process.returncode != 0:

@@ -29,6 +29,7 @@ from app.dashboard import (
     read_onboarding,
     read_agent_presets,
     mark_latest_background_failure,
+    stop_running_run,
     prepare_learning_improvement,
     apply_agent_preset,
     apply_welcome_configuration,
@@ -160,7 +161,7 @@ def test_dashboard_reads_agent_settings_from_config() -> None:
     settings = read_agent_settings(project_root, config, "analyst_neutral")
 
     assert settings["display_name"] == "Neutral Analyst Arbiter"
-    assert settings["effective_provider"] == "agents_sdk"
+    assert settings["effective_provider"] == (config.agents["analyst_neutral"].provider or config.defaults.provider)
     assert settings["effective_model"] == "gpt-5.4-mini"
     assert "analysis" in settings["skills"]
     assert settings["skill_markdowns"][0]["path"] == "skills\\analysis.md" or settings["skill_markdowns"][0]["path"] == "skills/analysis.md"
@@ -208,15 +209,31 @@ def test_welcome_configuration_applies_provider_and_model_to_all_agents(tmp_path
     assert onboarding["provider"] == "copilot"
 
 
-def test_provider_health_check_uses_configured_subprocess(tmp_path: Path) -> None:
+def test_welcome_configuration_applies_codex_cli_to_all_agents(tmp_path: Path) -> None:
     project_root = Path(__file__).resolve().parents[1]
     config_path = tmp_path / "configs" / "agents.yaml"
     config_path.parent.mkdir(parents=True)
     config_path.write_text((project_root / "configs" / "agents.yaml").read_text(encoding="utf-8"), encoding="utf-8")
-    raw = config_path.read_text(encoding="utf-8").replace("command: codex", f"command: {Path(__import__('sys').executable).as_posix()}", 1)
-    raw = raw.replace("    - exec\n    - --skip-git-repo-check\n    - --color\n    - never\n    - \"-\"", "    - -c\n    - \"import sys; data=sys.stdin.read(); print('health ok')\"", 1)
-    config_path.write_text(raw, encoding="utf-8")
+
+    result = apply_welcome_configuration(
+        tmp_path,
+        config_path,
+        {"provider": "codex_cli", "model": "gpt-5.4-mini"},
+    )
     config = load_config(config_path)
+    onboarding = read_onboarding(tmp_path, config)
+
+    assert result["updated"] is True
+    assert config.defaults.provider == "codex_cli"
+    assert all(agent.provider == "codex_cli" for agent in config.agents.values())
+    assert onboarding["provider"] == "codex_cli"
+
+
+def test_provider_health_check_uses_configured_subprocess(tmp_path: Path) -> None:
+    project_root = Path(__file__).resolve().parents[1]
+    config = load_config(project_root / "configs" / "agents.yaml")
+    config.codex_cli.command = Path(__import__("sys").executable).as_posix()
+    config.codex_cli.args = ["-c", "import sys; data=sys.stdin.read(); print('health ok')"]
 
     result = check_provider_health(tmp_path, config, "codex_cli", "gpt-5.4-mini")
 
@@ -343,6 +360,21 @@ def test_background_failure_marks_latest_run_failed(tmp_path: Path) -> None:
     assert status["status"] == "failed"
     assert status["agents"]["main"]["status"] == "failed"
     assert status["errors"][0]["message"] == "boom"
+
+
+def test_stop_running_run_marks_status_and_writes_stop_request(tmp_path: Path) -> None:
+    manager = ArtifactManager(tmp_path, Path("runs"))
+    manager.start_run("run-1", "Prompt", ["main", "builder"])
+    manager.update_agent("run-1", "builder", "running", "Working")
+
+    result = stop_running_run(tmp_path / "runs", "run-1", "User clicked stop")
+    status = read_status(tmp_path / "runs", "run-1")
+
+    assert result["accepted"] is True
+    assert status["status"] == "stopped"
+    assert status["agents"]["builder"]["status"] == "stopped"
+    assert status["errors"][0]["message"] == "User clicked stop"
+    assert (tmp_path / "runs" / "run-1" / "stop_requested.json").exists()
 
 
 def test_learning_actions_apply_selected_prompt_and_skill_changes(tmp_path: Path) -> None:

@@ -107,6 +107,12 @@ button {
   cursor: pointer;
 }
 
+.run-status-button.danger {
+  border-color: #f0b8b4;
+  color: #9d241d;
+  background: #fff0ef;
+}
+
 .run-status-button:hover {
   border-color: #69809a;
   background: #172335;

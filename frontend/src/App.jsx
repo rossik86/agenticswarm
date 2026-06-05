@@ -104,6 +104,13 @@ const MODEL_OPTIONS = {
   copilot: ["gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.3-codex", "gpt-5.3-codex-spark", "gpt-5.2", "copilot-default"]
 };
 
+function defaultModelForProvider(provider, currentModel = "gpt-5.4-mini") {
+  const options = MODEL_OPTIONS[provider] || [];
+  if (options.includes(currentModel)) return currentModel;
+  if (options.includes("gpt-5.4-mini")) return "gpt-5.4-mini";
+  return options[0] || currentModel;
+}
+
 export default function App() {
   const [status, setStatus] = useState(null);
   const [runs, setRuns] = useState([]);
@@ -190,6 +197,17 @@ export default function App() {
           selectedRunId={selectedRunId}
           onSelectRun={setSelectedRunId}
           onOpenRuns={() => setRunsDrawerOpen(true)}
+          onStopRun={async () => {
+            if (!status?.run_id) return;
+            setNotice(`Zatrzymuję run ${compactRunId(status.run_id)}...`);
+            const response = await fetch("/run/stop", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ run_id: status.run_id, reason: "User stopped run from dashboard." })
+            }).then((item) => item.json());
+            setNotice(response.message || "Run stop request zapisany.");
+            await refresh();
+          }}
         />
       </header>
 
@@ -417,10 +435,11 @@ export default function App() {
   }
 }
 
-function RunStatus({ status, runs, selectedRunId, onOpenRuns }) {
+function RunStatus({ status, runs, selectedRunId, onOpenRuns, onStopRun }) {
   const state = status?.status || "waiting";
   const Icon = state === "completed" ? CheckCircle2 : state === "failed" ? XCircle : Activity;
   const currentRun = status?.run_id ? { ...status, run_id: status.run_id } : null;
+  const canStop = Boolean(status?.run_id) && ["running", "waiting"].includes(state);
   return (
     <div className={`run-status ${state}`}>
       <div className="run-status-main">
@@ -436,6 +455,12 @@ function RunStatus({ status, runs, selectedRunId, onOpenRuns }) {
         Runs
         <em>{runs.length}</em>
       </button>
+      {canStop ? (
+        <button className="run-status-button danger" type="button" onClick={onStopRun} title="Zatrzymaj aktywny run">
+          <XCircle size={15} />
+          Stop
+        </button>
+      ) : null}
     </div>
   );
 }
@@ -1702,7 +1727,7 @@ function GlobalResourcesDrawer({ resources, runs = [], onboarding, onOpenText, o
                 <select value={welcomeProvider} onChange={(event) => {
                   const nextProvider = event.target.value;
                   setWelcomeProvider(nextProvider);
-                  setWelcomeModel((MODEL_OPTIONS[nextProvider] || [welcomeModel])[0] || welcomeModel);
+                  setWelcomeModel(defaultModelForProvider(nextProvider, welcomeModel));
                 }}>
                   {welcomeProviderOptions.map((provider) => <option value={provider} key={provider}>{provider}</option>)}
                 </select>
@@ -2022,7 +2047,7 @@ function WelcomeConfigurationModal({ onboarding, onClose, onSave }) {
             <select value={provider} onChange={(event) => {
               const nextProvider = event.target.value;
               setProvider(nextProvider);
-              setModel((MODEL_OPTIONS[nextProvider] || [model])[0] || model);
+              setModel(defaultModelForProvider(nextProvider, model));
             }}>
               {providerOptions.map((option) => <option value={option} key={option}>{option}</option>)}
             </select>

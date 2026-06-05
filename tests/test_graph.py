@@ -7,7 +7,14 @@ from app.agents.runner import AgentRunResult
 from app.artifacts.manager import ArtifactManager
 from app.config.loader import load_config
 from app.graph.builder import build_graph
-from app.graph.nodes import ANALYST_PANEL, RESEARCH_PANEL, REVIEW_PANEL, extract_grounding_claims, extract_learning_proposals
+from app.graph.nodes import (
+    ANALYST_PANEL,
+    RESEARCH_PANEL,
+    REVIEW_PANEL,
+    extract_grounding_claims,
+    extract_learning_proposals,
+    validate_builder_completeness,
+)
 from app.main import determine_final_run_status
 
 
@@ -177,11 +184,63 @@ def test_grounding_claims_and_learning_proposals_are_structured() -> None:
     assert proposals[0]["action"] == "prompt_append"
 
 
+def test_builder_completeness_rejects_implementation_request_without_codebase() -> None:
+    result = validate_builder_completeness(
+        "## Plan\n\nZrobimy aplikację Lotto w kolejnych krokach.",
+        "Przygotuj plan i zrealizuj aplikacje Lotto z instrukcja uruchomienia",
+    )
+
+    assert result["status"] == "needs_revision"
+    assert any("codebase" in issue.lower() for issue in result["issues"])
+
+
 def test_final_run_status_blocks_completed_when_revision_is_required() -> None:
     assert determine_final_run_status({"quality_result": {"status": "needs_revision"}}) == "needs_revision"
     assert determine_final_run_status({"supervisor_gate": {"status": "needs_revision"}}) == "needs_revision"
     assert determine_final_run_status({"learning_result": {"summary": "Quality decision: needs_revision"}}) == "needs_revision"
     assert determine_final_run_status({"quality_result": {"status": "accepted"}}) == "completed"
+
+
+def test_final_run_status_accepts_complete_final_codebase_after_revision_feedback() -> None:
+    final_answer = """
+## Struktura plikow
+```text
+package.json
+src/lotto.js
+tests/lotto.test.js
+```
+
+## Codebase
+### `package.json`
+```json
+{"scripts":{"test":"node --test"}}
+```
+
+### `src/lotto.js`
+```js
+export function generateLottoNumbers() { return [1, 2, 3, 4, 5, 6]; }
+```
+
+### `tests/lotto.test.js`
+```js
+import test from 'node:test';
+```
+
+## Uruchomienie
+```bash
+node --test
+```
+"""
+    result = determine_final_run_status(
+        {
+            "user_input": "Przygotuj plan i zrealizuj aplikacje Lotto z instrukcja uruchomienia",
+            "quality_result": {"status": "needs_revision"},
+            "supervisor_gate": {"status": "needs_revision"},
+            "final_answer": final_answer,
+        }
+    )
+
+    assert result == "completed"
 
 
 def test_async_acceptance_skips_blocking_main_decision(tmp_path: Path) -> None:
