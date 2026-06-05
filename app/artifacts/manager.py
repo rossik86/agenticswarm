@@ -7,6 +7,8 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from app.io.atomic import atomic_write_text
+
 
 @dataclass(frozen=True)
 class Artifact:
@@ -259,18 +261,18 @@ class ArtifactManager:
     def write_markdown(self, run_id: str, agent: str, filename: str, content: str) -> Artifact:
         path = self.run_dir(run_id) / filename
         body = content.strip() + "\n"
-        path.write_text(body, encoding="utf-8")
+        atomic_write_text(path, body)
         first_line = next((line.strip("# ").strip() for line in body.splitlines() if line.strip()), "")
         return Artifact(agent=agent, path=path, summary=first_line[:180])
 
     def _write_status(self, run_id: str, status: dict[str, Any]) -> None:
         body = json.dumps(status, ensure_ascii=True, indent=2)
-        self.status_path(run_id).write_text(body + "\n", encoding="utf-8")
-        self.latest_status_path().write_text(body + "\n", encoding="utf-8")
+        atomic_write_text(self.status_path(run_id), body + "\n")
+        atomic_write_text(self.latest_status_path(), body + "\n")
 
     def _write_json_artifact(self, run_id: str, filename: str, payload: dict[str, Any]) -> None:
         path = self.run_dir(run_id) / filename
-        path.write_text(json.dumps(payload, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
+        atomic_write_text(path, json.dumps(payload, ensure_ascii=True, indent=2) + "\n")
 
 
 def _timestamp() -> str:
