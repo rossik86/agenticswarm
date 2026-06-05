@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from app.agents.runner import AgentRunner
+from app.dashboard.schemas import LearningProposal
 from app.artifacts.manager import ArtifactManager
 from app.checkpoint.store import CheckpointStore
 from app.config.schema import SwarmConfig
@@ -274,7 +275,7 @@ class SwarmNodes:
                 },
                 "Review panel",
             )
-            parsed = result.parsed_json or _parse_review_text(result.text)
+            parsed = result.parsed_json or parse_review_output(result.text)
             panel_results.append({"agent": agent_name, "review": parsed, "artifact": metadata})
             artifacts.append(metadata)
 
@@ -565,6 +566,27 @@ def extract_grounding_claims(panel_results: list[dict[str, Any]]) -> list[dict[s
 
 
 def extract_learning_proposals(text: str) -> list[dict[str, Any]]:
+    parsed = _parse_json_object(text)
+    if parsed and isinstance(parsed.get("proposals"), list):
+        proposals: list[dict[str, Any]] = []
+        for item in parsed["proposals"]:
+            if not isinstance(item, dict):
+                continue
+            candidate = {
+                "id": str(item.get("id") or f"LRN-{len(proposals) + 1:03d}"),
+                "target": str(item.get("target") or "global"),
+                "action": str(item.get("action") or "prompt_append"),
+                "recommendation": str(item.get("recommendation") or item.get("reason") or ""),
+                "reason": str(item.get("reason") or item.get("recommendation") or ""),
+                "risk": str(item.get("risk") or "medium"),
+                "requires_approval": bool(item.get("requires_approval", True)),
+                "status": str(item.get("status") or "proposed"),
+            }
+            proposals.append(LearningProposal.model_validate(candidate).model_dump())
+            if len(proposals) >= 12:
+                break
+        return proposals
+
     proposals: list[dict[str, Any]] = []
     for line in str(text or "").splitlines():
         stripped = line.strip()
@@ -583,13 +605,18 @@ def extract_learning_proposals(text: str) -> list[dict[str, Any]]:
             target = "analyst_neutral"
         action = "prompt_append" if "prompt" in lower or "instruction" in lower else "skill_add"
         proposals.append(
-            {
+            LearningProposal.model_validate(
+                {
                 "id": f"LRN-{len(proposals) + 1:03d}",
                 "target": target,
                 "action": action,
                 "recommendation": body[:500],
+                "reason": body[:500],
+                "risk": "medium",
+                "requires_approval": True,
                 "status": "proposed",
-            }
+                }
+            ).model_dump()
         )
         if len(proposals) >= 12:
             break
@@ -642,13 +669,54 @@ def validate_builder_completeness(text: str, user_request: str) -> dict[str, Any
     }
 
 
-def _parse_review_text(text: str) -> dict[str, Any]:
+def parse_review_output(text: str) -> dict[str, Any]:
     stripped = text.strip()
+    parsed = _parse_json_object(stripped)
+    if isinstance(parsed, dict):
+        status = str(parsed.get("status") or "accepted")
+        blocking = parsed.get("blocking_issues")
+        issues = parsed.get("issues")
+        return {
+            **parsed,
+            "status": "needs_revision" if status == "failed" else status,
+            "blocking_issues": blocking if isinstance(blocking, list) else [],
+            "quality_notes": parsed.get("quality_notes") if isinstance(parsed.get("quality_notes"), list) else [],
+            "security_notes": parsed.get("security_notes") if isinstance(parsed.get("security_notes"), list) else [],
+            "required_changes": parsed.get("required_changes") if isinstance(parsed.get("required_changes"), list) else [],
+            "issues": issues if isinstance(issues, list) else [],
+            "summary": str(parsed.get("summary") or parsed.get("reason") or text[:300]),
+        }
+    lower = stripped.lower()
+    needs_revision = any(term in lower for term in ["needs_revision", "wymaga poprawy", "blocking", "blokuj"])
+    return {
+        "status": "needs_revision" if needs_revision else "accepted",
+        "summary": text[:300],
+        "issues": [],
+        "blocking_issues": [],
+        "quality_notes": [],
+        "security_notes": [],
+        "required_changes": [],
+    }
+
+
+def _parse_review_text(text: str) -> dict[str, Any]:
+    return parse_review_output(text)
+
+
+def _parse_json_object(text: str) -> dict[str, Any] | None:
+    stripped = str(text or "").strip()
+    if stripped.startswith("```"):
+        lines = stripped.splitlines()
+        if lines and lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].startswith("```"):
+            lines = lines[:-1]
+        stripped = "\n".join(lines).strip()
     try:
         parsed = json.loads(stripped)
-        return parsed if isinstance(parsed, dict) else {"status": "accepted", "summary": text[:300]}
     except json.JSONDecodeError:
-        return {"status": "accepted", "summary": text[:300], "issues": []}
+        return None
+    return parsed if isinstance(parsed, dict) else None
 
 
 def _review_summary(panel_results: list[dict[str, Any]]) -> str:

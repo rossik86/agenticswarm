@@ -19,6 +19,7 @@ import yaml
 
 from app.agents.runner import load_skill_markdowns
 from app.config.loader import load_config
+from app.io.atomic import atomic_write_text
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -466,9 +467,9 @@ def update_agent_runtime_settings(config_path: Path, payload: dict[str, object])
             return {"updated": False, "message": "Niepoprawna ścieżka promptu."}
         if path.exists():
             record_resource_version(root, str(Path(str(prompt_path)).as_posix()), path.read_text(encoding="utf-8"), "agent_prompt_update")
-        path.write_text(str(payload.get("prompt") or ""), encoding="utf-8")
+        atomic_write_text(path, str(payload.get("prompt") or ""))
 
-    config_path.write_text(yaml.safe_dump(raw, sort_keys=False, allow_unicode=False), encoding="utf-8")
+    atomic_write_text(config_path, yaml.safe_dump(raw, sort_keys=False, allow_unicode=False))
     load_config(config_path)
     return {"updated": True, "message": "Ustawienia agenta zapisane."}
 
@@ -521,12 +522,13 @@ def apply_welcome_configuration(project_root: Path, config_path: Path, payload: 
         agent["model"] = model
         updated_agents += 1
 
-    config_path.write_text(yaml.safe_dump(raw, sort_keys=False, allow_unicode=False), encoding="utf-8")
+    atomic_write_text(config_path, yaml.safe_dump(raw, sort_keys=False, allow_unicode=False))
     load_config(config_path)
 
     state_path = project_root / "workspace" / "onboarding.json"
     state_path.parent.mkdir(parents=True, exist_ok=True)
-    state_path.write_text(
+    atomic_write_text(
+        state_path,
         json.dumps(
             {
                 "configured": True,
@@ -539,7 +541,6 @@ def apply_welcome_configuration(project_root: Path, config_path: Path, payload: 
             indent=2,
         )
         + "\n",
-        encoding="utf-8",
     )
     return {
         "updated": True,
@@ -650,7 +651,7 @@ def apply_agent_preset(project_root: Path, config_path: Path, preset_id: str) ->
             agent["skills"] = skills
         changed += 1
     raw.setdefault("defaults", {})["model"] = preset.get("default_model", raw.get("defaults", {}).get("model", "gpt-5.4-mini"))
-    config_path.write_text(yaml.safe_dump(raw, sort_keys=False, allow_unicode=False), encoding="utf-8")
+    atomic_write_text(config_path, yaml.safe_dump(raw, sort_keys=False, allow_unicode=False))
     load_config(config_path)
     action = append_checkpoint_action(
         project_root / "workspace" / "preset_actions.jsonl",
@@ -712,7 +713,7 @@ def update_skill_resource(project_root: Path, name: str, content: str, action: s
         record_resource_version(project_root, str(path.relative_to(project_root).as_posix()), path.read_text(encoding="utf-8"), "skill_update")
     else:
         record_resource_version(project_root, str(path.relative_to(project_root).as_posix()), "", "skill_create")
-    path.write_text(content.strip() + "\n", encoding="utf-8")
+    atomic_write_text(path, content.strip() + "\n")
     return {"updated": True, "message": f"Skill {name} zapisany.", "resource": {"name": name, "path": str(path)}}
 
 
@@ -735,7 +736,7 @@ def update_mcp_resource(project_root: Path, name: str, payload: dict[str, object
     resources = [item for item in read_mcp_resources(project_root) if isinstance(item, dict)]
     if action == "delete":
         resources = [item for item in resources if item.get("name") != name]
-        path.write_text(json.dumps(resources, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
+        atomic_write_text(path, json.dumps(resources, ensure_ascii=True, indent=2) + "\n")
         return {"updated": True, "message": f"MCP {name} usunięty.", "removed_name": name}
 
     next_resource = {
@@ -748,7 +749,7 @@ def update_mcp_resource(project_root: Path, name: str, payload: dict[str, object
     resources = [item for item in resources if item.get("name") != name]
     resources.append(next_resource)
     resources.sort(key=lambda item: str(item.get("name", "")))
-    path.write_text(json.dumps(resources, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
+    atomic_write_text(path, json.dumps(resources, ensure_ascii=True, indent=2) + "\n")
     return {"updated": True, "message": f"MCP {name} zapisany.", "resource": next_resource}
 
 
@@ -789,7 +790,7 @@ def write_learning_improvement_artifact(project_root: Path, action_id: object, s
         "## Kontrakt poprawy\n\n"
         f"{prompt}\n"
     )
-    path.write_text(body, encoding="utf-8")
+    atomic_write_text(path, body)
     return path
 
 
@@ -904,7 +905,7 @@ def restore_resource_version(project_root: Path, version_id: str) -> dict[str, o
     if target.exists() and target.is_file():
         record_resource_version(project_root, resource, target.read_text(encoding="utf-8"), "version_rollback")
     target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(str(version.get("content") or ""), encoding="utf-8")
+    atomic_write_text(target, str(version.get("content") or ""))
     return {"updated": True, "message": f"Przywrócono wersję {version_id}.", "resource": resource}
 
 
@@ -956,7 +957,7 @@ def update_task_template(project_root: Path, payload: dict[str, object]) -> dict
     templates.sort(key=lambda item: str(item.get("id", "")))
     path = project_root / "workspace" / "task_templates.json"
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps({"templates": templates}, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
+    atomic_write_text(path, json.dumps({"templates": templates}, ensure_ascii=True, indent=2) + "\n")
     return {"updated": True, "message": f"Template {template_id} zapisany.", "template": next_template}
 
 
@@ -995,7 +996,7 @@ def _apply_prompt_append(project_root: Path, config_path: Path, agent_name: str,
         raise ValueError("Niepoprawna ścieżka promptu.")
     previous = path.read_text(encoding="utf-8") if path.exists() else ""
     record_resource_version(project_root, prompt_path.as_posix(), previous, "learning_prompt_append")
-    path.write_text(previous.rstrip() + "\n\n## Learning improvement\n" + content.strip() + "\n", encoding="utf-8")
+    atomic_write_text(path, previous.rstrip() + "\n\n## Learning improvement\n" + content.strip() + "\n")
     return f"prompt:{agent_name}"
 
 
@@ -1017,7 +1018,7 @@ def _apply_agent_skill_add(config_path: Path, agent_name: str, skill_name: str) 
     skills = agent.setdefault("skills", [])
     if skill_name not in skills:
         skills.append(skill_name)
-    config_path.write_text(yaml.safe_dump(raw, sort_keys=False, allow_unicode=False), encoding="utf-8")
+    atomic_write_text(config_path, yaml.safe_dump(raw, sort_keys=False, allow_unicode=False))
     return f"agent-skill:{agent_name}:{skill_name}"
 
 
@@ -1134,7 +1135,7 @@ def _sync_removed_list_references(config_path: Path, key: str, removed_name: obj
             agent[key] = next_items
             changed = True
     if changed:
-        config_path.write_text(yaml.safe_dump(raw, sort_keys=False, allow_unicode=False), encoding="utf-8")
+        atomic_write_text(config_path, yaml.safe_dump(raw, sort_keys=False, allow_unicode=False))
 
 
 def _read_run_artifact_text(status: dict[str, object], agent_name: str) -> str:
@@ -1459,8 +1460,8 @@ def mark_latest_background_failure(project_root: Path, config_path: Path, error:
                 main["summary"] = "Background run failed before agent execution."
         body = json.dumps(status, ensure_ascii=True, indent=2) + "\n"
         run_path = artifact_root / str(status["run_id"]) / "status.json"
-        run_path.write_text(body, encoding="utf-8")
-        latest_path.write_text(body, encoding="utf-8")
+        atomic_write_text(run_path, body)
+        atomic_write_text(latest_path, body)
     except Exception:
         return
 
