@@ -21,7 +21,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--provider",
-        choices=["agents_sdk", "codex_cli"],
+        choices=["agents_sdk", "codex_cli", "openhands", "copilot"],
         help="Override the default provider for agents that do not set one explicitly.",
     )
     parser.add_argument(

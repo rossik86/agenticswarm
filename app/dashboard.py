@@ -70,6 +70,9 @@ def serve_dashboard(project_root: Path, config_path: Path, host: str = "127.0.0.
             if parsed.path == "/resources.json":
                 self._send_json(read_global_resources(project_root, config))
                 return
+            if parsed.path == "/onboarding.json":
+                self._send_json(read_onboarding(project_root, config))
+                return
             if parsed.path == "/templates.json":
                 self._send_json(read_task_templates(project_root))
                 return
@@ -123,6 +126,14 @@ def serve_dashboard(project_root: Path, config_path: Path, host: str = "127.0.0.
                 result = update_global_resource(project_root, config_path, payload)
                 if result.get("updated"):
                     config = load_config(config_path)
+                self._send_json(result)
+                return
+            if parsed.path == "/onboarding.json":
+                payload = self._read_json_body()
+                result = apply_welcome_configuration(project_root, config_path, payload)
+                if result.get("updated"):
+                    config = load_config(config_path)
+                    result["onboarding"] = read_onboarding(project_root, config)
                 self._send_json(result)
                 return
             if parsed.path == "/learning/improve":
@@ -392,7 +403,7 @@ def update_agent_runtime_settings(config_path: Path, payload: dict[str, object])
         provider_value = payload.get("provider")
         if provider_value in {"", None, "default"}:
             agent.pop("provider", None)
-        elif provider_value in {"agents_sdk", "codex_cli", "openhands"}:
+        elif provider_value in _provider_options():
             agent["provider"] = str(provider_value)
         else:
             return {"updated": False, "message": "Nieobsługiwany provider."}
@@ -437,6 +448,83 @@ def update_agent_runtime_settings(config_path: Path, payload: dict[str, object])
     return {"updated": True, "message": "Ustawienia agenta zapisane."}
 
 
+def read_onboarding(project_root: Path, config: object) -> dict[str, object]:
+    state_path = project_root / "workspace" / "onboarding.json"
+    state: dict[str, object] = {}
+    if state_path.exists():
+        try:
+            loaded = json.loads(state_path.read_text(encoding="utf-8"))
+            state = loaded if isinstance(loaded, dict) else {}
+        except json.JSONDecodeError:
+            state = {}
+    defaults = getattr(config, "defaults", None)
+    agents = getattr(config, "agents", {})
+    return {
+        "configured": bool(state.get("configured")),
+        "configured_at": state.get("configured_at"),
+        "provider": state.get("provider") or getattr(defaults, "provider", "agents_sdk"),
+        "model": state.get("model") or getattr(defaults, "model", "gpt-5.4-mini"),
+        "provider_options": list(_provider_options()),
+        "model_options": model_options_for_provider(str(state.get("provider") or getattr(defaults, "provider", "agents_sdk"))),
+        "agent_count": len(agents) if isinstance(agents, dict) else 0,
+    }
+
+
+def apply_welcome_configuration(project_root: Path, config_path: Path, payload: dict[str, object]) -> dict[str, object]:
+    provider = str(payload.get("provider") or "").strip()
+    model = str(payload.get("model") or "").strip()
+    if provider not in _provider_options():
+        return {"updated": False, "message": "Nieobsługiwany provider."}
+    if not model:
+        return {"updated": False, "message": "Model jest wymagany."}
+
+    raw = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+    defaults = raw.setdefault("defaults", {})
+    if not isinstance(defaults, dict):
+        return {"updated": False, "message": "Niepoprawna sekcja defaults."}
+    agents = raw.get("agents")
+    if not isinstance(agents, dict):
+        return {"updated": False, "message": "Niepoprawna sekcja agents."}
+
+    defaults["provider"] = provider
+    defaults["model"] = model
+    updated_agents = 0
+    for agent in agents.values():
+        if not isinstance(agent, dict):
+            continue
+        agent["provider"] = provider
+        agent["model"] = model
+        updated_agents += 1
+
+    config_path.write_text(yaml.safe_dump(raw, sort_keys=False, allow_unicode=False), encoding="utf-8")
+    load_config(config_path)
+
+    state_path = project_root / "workspace" / "onboarding.json"
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    state_path.write_text(
+        json.dumps(
+            {
+                "configured": True,
+                "provider": provider,
+                "model": model,
+                "agent_count": updated_agents,
+                "configured_at": _timestamp(),
+            },
+            ensure_ascii=True,
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    return {
+        "updated": True,
+        "message": f"Welcome config zapisany dla {updated_agents} agentów.",
+        "provider": provider,
+        "model": model,
+        "agent_count": updated_agents,
+    }
+
+
 def read_global_resources(project_root: Path, config: object) -> dict[str, object]:
     skill_root = project_root / "skills"
     skills = []
@@ -454,6 +542,7 @@ def read_global_resources(project_root: Path, config: object) -> dict[str, objec
         "agents": [read_agent_settings(project_root, config, name) for name in sorted(getattr(config, "agents", {}))],
         "skills": skills,
         "mcp": read_mcp_resources(project_root),
+        "onboarding": read_onboarding(project_root, config),
     }
 
 
@@ -945,8 +1034,13 @@ def model_options_for_provider(provider: str) -> list[str]:
         "agents_sdk": ["gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.3-codex", "gpt-5.3-codex-spark", "gpt-5.2"],
         "codex_cli": ["gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.3-codex", "gpt-5.3-codex-spark", "gpt-5.2"],
         "openhands": ["gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.3-codex", "gpt-5.3-codex-spark", "gpt-5.2", "local"],
+        "copilot": ["gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.3-codex", "gpt-5.3-codex-spark", "gpt-5.2", "copilot-default"],
     }
     return options.get(provider, [])
+
+
+def _provider_options() -> tuple[str, ...]:
+    return ("agents_sdk", "codex_cli", "openhands", "copilot")
 
 
 def _path_timestamp(path: Path) -> str:

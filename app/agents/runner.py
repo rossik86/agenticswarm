@@ -34,6 +34,8 @@ class AgentRunner:
             return await self._run_codex_cli(agent_name, agent_config, prompt, input_text)
         if provider == "openhands":
             return await self._run_openhands(agent_name, agent_config, prompt, input_text)
+        if provider == "copilot":
+            return await self._run_copilot(agent_name, agent_config, prompt, input_text)
 
         try:
             return await self._run_openai_agent(agent_name, agent_config, prompt, input_text)
@@ -152,6 +154,50 @@ class AgentRunner:
             )
         text = output or error_output
         return AgentRunResult(text=text, parsed_json=_try_parse_json(text))
+
+    async def _run_copilot(
+        self,
+        agent_name: str,
+        agent_config: AgentConfig,
+        prompt: str,
+        input_text: str,
+    ) -> AgentRunResult:
+        cli_config = self.config.copilot
+        full_prompt = "\n\n".join(
+            [
+                _compose_instructions(self.project_root, agent_config, prompt),
+                "You are running as the Copilot-backed agent inside a parent multi-agent runtime.",
+                "Return only the requested content. Do not ask interactive follow-up questions.",
+                "Task input:",
+                input_text,
+            ]
+        )
+        command = _resolve_command(cli_config.command)
+        if command == cli_config.command and not shutil.which(command):
+            raise RuntimeError(
+                "Copilot provider is configured but its command is not available. "
+                "Install GitHub CLI/Copilot or set `copilot.command` in configs/agents.yaml."
+            )
+        args = [command, *cli_config.args]
+        process = await asyncio.create_subprocess_exec(
+            *args,
+            cwd=str(self.project_root),
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await asyncio.wait_for(
+            process.communicate(full_prompt.encode("utf-8")),
+            timeout=cli_config.timeout_seconds,
+        )
+        output = stdout.decode("utf-8", errors="replace").strip()
+        error_output = stderr.decode("utf-8", errors="replace").strip()
+        if process.returncode != 0:
+            raise RuntimeError(
+                f"Copilot agent '{agent_name}' failed with exit code {process.returncode}: {error_output}"
+            )
+        text = output or error_output
+        return AgentRunResult(text=text, parsed_json=_try_parse_json(text), token_usage={"source": "copilot"})
 
 
 def _try_parse_json(text: str) -> dict[str, Any] | None:

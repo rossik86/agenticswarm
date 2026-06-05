@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field
 
 
 AgentType = Literal["main", "supervisor", "specialist", "reviewer"]
-ProviderType = Literal["agents_sdk", "codex_cli", "openhands"]
+ProviderType = Literal["agents_sdk", "codex_cli", "openhands", "copilot"]
 MemoryBackend = Literal["none", "sqlite", "mem0"]
 ObservabilityBackend = Literal["local", "agentops"]
 
@@ -28,6 +28,12 @@ class OpenHandsConfig(BaseModel):
     command: str = "openhands"
     args: list[str] = Field(default_factory=lambda: ["--help"])
     timeout_seconds: int = 1800
+
+
+class CopilotConfig(BaseModel):
+    command: str = "gh"
+    args: list[str] = Field(default_factory=lambda: ["copilot", "suggest", "-t", "shell"])
+    timeout_seconds: int = 900
 
 
 class MemoryConfig(BaseModel):
@@ -64,6 +70,7 @@ class SwarmConfig(BaseModel):
     defaults: LlmDefaults = Field(default_factory=LlmDefaults)
     codex_cli: CodexCliConfig = Field(default_factory=CodexCliConfig)
     openhands: OpenHandsConfig = Field(default_factory=OpenHandsConfig)
+    copilot: CopilotConfig = Field(default_factory=CopilotConfig)
     memory: MemoryConfig = Field(default_factory=MemoryConfig)
     checkpoint: CheckpointConfig = Field(default_factory=CheckpointConfig)
     observability: ObservabilityConfig = Field(default_factory=ObservabilityConfig)

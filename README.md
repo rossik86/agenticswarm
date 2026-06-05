@@ -1,6 +1,21 @@
 # Multiagent Swarm
 
-CLI-first multi-agent runtime using LangGraph as the orchestration layer and OpenAI Agents SDK as the execution layer for individual LLM agents.
+CLI-first multi-agent runtime with a React dashboard for observing and steering a role-based AI agent swarm.
+
+LangGraph is used as the orchestration layer. Agents can run through OpenAI Agents SDK, Codex CLI, OpenHands, or a configurable Copilot CLI wrapper.
+
+## Features
+
+- Role-based swarm: Main, Supervisor, Analyst Council, Research Council, Builder, Review Council, and Self-Learning Quality Optimizer.
+- Council pattern: positive, negative, and neutral agents collaborate inside selected roles before a handoff leaves the room.
+- Markdown artifacts per run and per agent under `workspace/runs/<run_id>/`.
+- Checkpoints stored in SQLite for resume/restart workflows.
+- Local memory store for concise context reuse between runs.
+- Local observability with JSONL events, token usage, room IO, agent status, and run history.
+- React Town dashboard at `/town` with pixel-art rooms, agents, run flow, progress checkpoints, drawers, and artifact inspection.
+- Global configuration drawer for agents, skills, MCP resources, templates, versions, and run diffs.
+- Welcome configuration GUI for new users: set provider and model once and apply them to all agents.
+- Provider support: `agents_sdk`, `codex_cli`, `openhands`, and `copilot`.
 
 ## Shape
 
@@ -26,7 +41,36 @@ $env:OPENAI_API_KEY="..."
 python -m app.cli
 ```
 
-## Using Codex CLI Instead Of An API Key
+Run one task non-interactively:
+
+```powershell
+.\.venv\Scripts\python.exe -m app.cli --provider codex_cli --prompt "Przygotuj plan aplikacji lotto"
+```
+
+Run the dashboard:
+
+```powershell
+.\.venv\Scripts\python.exe -m app.cli --dashboard
+```
+
+Open:
+
+```text
+http://127.0.0.1:8765/town
+```
+
+For a new user, the Town UI opens a welcome configuration modal. Pick a provider and model, then save. The selection is written to `configs/agents.yaml` for `defaults` and every configured agent.
+
+## Providers
+
+Supported provider values:
+
+- `agents_sdk` - OpenAI Agents SDK, uses `OPENAI_API_KEY`.
+- `codex_cli` - local Codex CLI subprocess.
+- `openhands` - configurable OpenHands subprocess.
+- `copilot` - configurable Copilot subprocess, usually backed by GitHub CLI/Copilot or a local wrapper.
+
+### Using Codex CLI Instead Of An API Key
 
 You can run agents through the local Codex CLI by changing the provider in `configs/agents.yaml`.
 
@@ -47,7 +91,7 @@ For one agent:
 
 ```yaml
 agents:
-  coder:
+  builder:
     provider: codex_cli
 ```
 
@@ -83,14 +127,21 @@ npm install -g @openai/codex
 Agents are configured in `configs/agents.yaml`. Each agent can define:
 
 - base prompt file
-- provider: `agents_sdk` or `codex_cli`
-- provider: `agents_sdk`, `codex_cli`, or `openhands`
+- provider: `agents_sdk`, `codex_cli`, `openhands`, or `copilot`
 - model
 - temperature
 - type
 - tools
 - delegation targets
 - output artifact name
+
+The fastest way to configure all agents is the welcome GUI:
+
+1. Start the dashboard with `.\.venv\Scripts\python.exe -m app.cli --dashboard`.
+2. Open `http://127.0.0.1:8765/town`.
+3. Use the welcome modal or the left drawer tab `Start`.
+4. Choose provider and model.
+5. Save to apply the selection to every agent at once.
 
 ## Artifacts
 
@@ -128,15 +179,15 @@ AI Town-style role view:
 http://127.0.0.1:8765/town
 ```
 
-It renders roles as buildings and agents as status avatars grouped by role and stance.
+It renders rooms around Main CO as an office/town map. React Flow overlays the run transitions between rooms, with checkpoint progress above the map.
 
 ## OpenHands Provider
 
-OpenHands can be configured as a specialist backend, typically for the `coder` agent:
+OpenHands can be configured as a specialist backend, typically for the `builder` agent:
 
 ```yaml
 agents:
-  coder:
+  builder:
     provider: openhands
 ```
 
@@ -151,6 +202,23 @@ openhands:
 ```
 
 The default is a safe placeholder. Set `openhands.args` to the non-interactive command supported by your local OpenHands installation.
+
+## Copilot Provider
+
+The Copilot provider is a generic subprocess adapter. Configure it in `configs/agents.yaml`:
+
+```yaml
+copilot:
+  command: gh
+  args:
+    - copilot
+    - suggest
+    - -t
+    - shell
+  timeout_seconds: 900
+```
+
+For reliable agent execution, prefer a non-interactive wrapper that accepts the prompt over stdin and writes the final answer to stdout. During tests you can point `copilot.command` to any executable and set `copilot.args` accordingly.
 
 ## Memory
 
@@ -182,3 +250,10 @@ observability:
 ```
 
 Install and configure AgentOps separately before enabling it.
+
+## More Docs
+
+- [New user instructions](docs/new-user-instructions.md)
+- [Codebase overview](docs/codebase.md)
+- [Architecture](docs/ARCHITECTURE.md)
+- [Town layout guide](docs/town-layout-guide.md)

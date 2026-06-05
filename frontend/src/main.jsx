@@ -25,7 +25,8 @@ import {
   GitCompare,
   History,
   ClipboardList,
-  XCircle
+  XCircle,
+  Rocket
 } from "lucide-react";
 import roomTile from "./assets/pixel-room.png";
 import commandRoom from "./assets/pixel-command-room.png";
@@ -100,7 +101,8 @@ const FLOW_NODE_TYPES = { flowRoom: FlowRoomNode };
 const MODEL_OPTIONS = {
   agents_sdk: ["gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.3-codex", "gpt-5.3-codex-spark", "gpt-5.2"],
   codex_cli: ["gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.3-codex", "gpt-5.3-codex-spark", "gpt-5.2"],
-  openhands: ["gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.3-codex", "gpt-5.3-codex-spark", "gpt-5.2", "local"]
+  openhands: ["gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.3-codex", "gpt-5.3-codex-spark", "gpt-5.2", "local"],
+  copilot: ["gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.3-codex", "gpt-5.3-codex-spark", "gpt-5.2", "copilot-default"]
 };
 
 function App() {
@@ -117,6 +119,8 @@ function App() {
   const [settingsDrawerOpen, setSettingsDrawerOpen] = useState(false);
   const [resourcesDrawerOpen, setResourcesDrawerOpen] = useState(false);
   const [resources, setResources] = useState(null);
+  const [onboarding, setOnboarding] = useState(null);
+  const [welcomeOpen, setWelcomeOpen] = useState(false);
   const [learningPending, setLearningPending] = useState(false);
   const [inspectorOpen, setInspectorOpen] = useState(true);
   const [runsDrawerOpen, setRunsDrawerOpen] = useState(false);
@@ -141,6 +145,13 @@ function App() {
 
   useEffect(() => {
     refresh().catch(() => setNotice("Nie mogę pobrać aktualnego statusu."));
+    fetch("/onboarding.json", { cache: "no-store" })
+      .then((response) => response.json())
+      .then((data) => {
+        setOnboarding(data);
+        if (!data.configured) setWelcomeOpen(true);
+      })
+      .catch(() => {});
     const timer = window.setInterval(() => {
       refresh().catch(() => setNotice("Odświeżenie statusu nie powiodło się."));
     }, 5000);
@@ -332,6 +343,13 @@ function App() {
             const data = await fetch("/resources.json", { cache: "no-store" }).then((item) => item.json());
             setResources(data);
           }}
+          onboarding={onboarding || resources?.onboarding}
+          onConfigureWelcome={async (payload) => {
+            const response = await saveWelcomeConfiguration(payload);
+            const data = await fetch("/resources.json", { cache: "no-store" }).then((item) => item.json());
+            setResources(data);
+            return response;
+          }}
           onSave={async (payload) => {
             const response = await fetch("/resources.json", {
               method: "POST",
@@ -357,8 +375,31 @@ function App() {
           onClose={() => setRunsDrawerOpen(false)}
         />
       ) : null}
+      {welcomeOpen ? (
+        <WelcomeConfigurationModal
+          onboarding={onboarding}
+          onClose={() => setWelcomeOpen(false)}
+          onSave={async (payload) => {
+            await saveWelcomeConfiguration(payload);
+            setWelcomeOpen(false);
+          }}
+        />
+      ) : null}
     </main>
   );
+
+  async function saveWelcomeConfiguration(payload) {
+    setNotice("Zapisuję konfigurację startową dla wszystkich agentów.");
+    const response = await fetch("/onboarding.json", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    }).then((item) => item.json());
+    setNotice(response.message || "Konfiguracja startowa zapisana.");
+    if (response.onboarding) setOnboarding(response.onboarding);
+    await refresh();
+    return response;
+  }
 }
 
 function RunStatus({ status, runs, selectedRunId, onOpenRuns }) {
@@ -1297,6 +1338,7 @@ function AgentSettingsDrawer({ settings, onClose, onSave }) {
                   <option value="agents_sdk">agents_sdk</option>
                   <option value="codex_cli">codex_cli</option>
                   <option value="openhands">openhands</option>
+                  <option value="copilot">copilot</option>
                 </select>
               </label>
               <label>
@@ -1430,8 +1472,8 @@ function AgentSettingsDrawer({ settings, onClose, onSave }) {
   );
 }
 
-function GlobalResourcesDrawer({ resources, runs = [], onOpenText, onClose, onSave, onReload }) {
-  const [tab, setTab] = useState("agents");
+function GlobalResourcesDrawer({ resources, runs = [], onboarding, onOpenText, onClose, onSave, onReload, onConfigureWelcome }) {
+  const [tab, setTab] = useState(resources?.onboarding?.configured ? "agents" : "start");
   const [selectedSkill, setSelectedSkill] = useState("");
   const [skillName, setSkillName] = useState("");
   const [skillContent, setSkillContent] = useState("");
@@ -1447,10 +1489,20 @@ function GlobalResourcesDrawer({ resources, runs = [], onOpenText, onClose, onSa
   const [diffBase, setDiffBase] = useState("");
   const [diffTarget, setDiffTarget] = useState("");
   const [runDiff, setRunDiff] = useState(null);
+  const [welcomeProvider, setWelcomeProvider] = useState("codex_cli");
+  const [welcomeModel, setWelcomeModel] = useState("gpt-5.4-mini");
   const [saving, setSaving] = useState(false);
   const [rollingBackVersion, setRollingBackVersion] = useState("");
   const skills = resources?.skills || [];
   const mcps = resources?.mcp || [];
+  const welcomeState = onboarding || resources?.onboarding || {};
+  const welcomeProviderOptions = welcomeState.provider_options || ["agents_sdk", "codex_cli", "openhands", "copilot"];
+  const welcomeModelOptions = MODEL_OPTIONS[welcomeProvider] || welcomeState.model_options || [];
+  useEffect(() => {
+    if (!welcomeState) return;
+    setWelcomeProvider(welcomeState.provider || "codex_cli");
+    setWelcomeModel(welcomeState.model || "gpt-5.4-mini");
+  }, [welcomeState?.provider, welcomeState?.model]);
   useEffect(() => {
     const skill = skills.find((item) => item.name === selectedSkill) || skills[0];
     if (!skill) return;
@@ -1496,6 +1548,7 @@ function GlobalResourcesDrawer({ resources, runs = [], onOpenText, onClose, onSa
         </header>
         <nav className="settings-tabs" aria-label="Globalne sekcje">
           {[
+            ["start", "Start", Rocket],
             ["agents", "Agenci", Settings],
             ["skills", "Skille", FileText],
             ["mcp", "MCP", Database],
@@ -1509,6 +1562,51 @@ function GlobalResourcesDrawer({ resources, runs = [], onOpenText, onClose, onSa
             </button>
           ))}
         </nav>
+        {tab === "start" ? (
+          <section className="resource-section welcome-config-panel">
+            <h3>Welcome configuration</h3>
+            <p className="muted">
+              Ustaw provider i model dla całego swarmu. Zapis nadpisze te wartości w defaults oraz we wszystkich agentach.
+            </p>
+            <form className="settings-edit-form" onSubmit={async (event) => {
+              event.preventDefault();
+              setSaving(true);
+              try {
+                await onConfigureWelcome?.({ provider: welcomeProvider, model: welcomeModel });
+                await onReload?.();
+              } finally {
+                setSaving(false);
+              }
+            }}>
+              <label>
+                <span>Provider</span>
+                <select value={welcomeProvider} onChange={(event) => {
+                  const nextProvider = event.target.value;
+                  setWelcomeProvider(nextProvider);
+                  setWelcomeModel((MODEL_OPTIONS[nextProvider] || [welcomeModel])[0] || welcomeModel);
+                }}>
+                  {welcomeProviderOptions.map((provider) => <option value={provider} key={provider}>{provider}</option>)}
+                </select>
+              </label>
+              <label>
+                <span>Model</span>
+                <input list="welcome-model-options" value={welcomeModel} onChange={(event) => setWelcomeModel(event.target.value)} />
+                <datalist id="welcome-model-options">
+                  {welcomeModelOptions.map((option) => <option value={option} key={option} />)}
+                </datalist>
+              </label>
+              <div className="welcome-config-summary">
+                <KeyValue label="Configured" value={welcomeState.configured ? "tak" : "nie"} />
+                <KeyValue label="Agents" value={welcomeState.agent_count ?? (resources?.agents || []).length} />
+                <KeyValue label="Current provider" value={welcomeState.provider || "-"} />
+                <KeyValue label="Current model" value={welcomeState.model || "-"} />
+              </div>
+              <button type="submit" disabled={saving}>
+                <Save size={14} /> Zapisz dla wszystkich agentów
+              </button>
+            </form>
+          </section>
+        ) : null}
         {tab === "agents" ? (
           <section className="resource-section">
             <h3>Agenci</h3>
@@ -1715,6 +1813,62 @@ function GlobalResourcesDrawer({ resources, runs = [], onOpenText, onClose, onSa
             ) : null}
           </section>
         ) : null}
+      </section>
+    </div>
+  );
+}
+
+function WelcomeConfigurationModal({ onboarding, onClose, onSave }) {
+  const [provider, setProvider] = useState(onboarding?.provider || "codex_cli");
+  const [model, setModel] = useState(onboarding?.model || "gpt-5.4-mini");
+  const [saving, setSaving] = useState(false);
+  const providerOptions = onboarding?.provider_options || ["agents_sdk", "codex_cli", "openhands", "copilot"];
+  const modelOptions = MODEL_OPTIONS[provider] || onboarding?.model_options || [];
+  return (
+    <div className="drawer-backdrop welcome-backdrop" role="presentation" onClick={onClose}>
+      <section className="welcome-modal" role="dialog" aria-modal="true" aria-label="Konfiguracja startowa" onClick={(event) => event.stopPropagation()}>
+        <header>
+          <div>
+            <Rocket size={22} />
+            <h2>Konfiguracja startowa</h2>
+          </div>
+          <p>Wybierz provider i model. Zapis zostanie zastosowany jednocześnie do wszystkich agentów.</p>
+        </header>
+        <form className="settings-edit-form" onSubmit={async (event) => {
+          event.preventDefault();
+          setSaving(true);
+          try {
+            await onSave({ provider, model });
+          } finally {
+            setSaving(false);
+          }
+        }}>
+          <label>
+            <span>Provider</span>
+            <select value={provider} onChange={(event) => {
+              const nextProvider = event.target.value;
+              setProvider(nextProvider);
+              setModel((MODEL_OPTIONS[nextProvider] || [model])[0] || model);
+            }}>
+              {providerOptions.map((option) => <option value={option} key={option}>{option}</option>)}
+            </select>
+          </label>
+          <label>
+            <span>Model</span>
+            <input list="welcome-modal-model-options" value={model} onChange={(event) => setModel(event.target.value)} />
+            <datalist id="welcome-modal-model-options">
+              {modelOptions.map((option) => <option value={option} key={option} />)}
+            </datalist>
+          </label>
+          <div className="welcome-actions">
+            <button type="submit" disabled={saving}>
+              <Save size={14} /> Zapisz i przejdź do dashboardu
+            </button>
+            <button type="button" onClick={onClose} disabled={saving}>
+              Pomiń
+            </button>
+          </div>
+        </form>
       </section>
     </div>
   );

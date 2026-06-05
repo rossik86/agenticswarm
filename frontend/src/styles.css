@@ -1465,6 +1465,42 @@ button {
   background: rgba(13, 21, 31, 0.32);
 }
 
+.welcome-backdrop {
+  display: grid;
+  place-items: center;
+  padding: 20px;
+}
+
+.welcome-modal {
+  width: min(520px, calc(100vw - 32px));
+  max-height: calc(100vh - 48px);
+  overflow: auto;
+  padding: 18px;
+  border: 1px solid rgba(130, 153, 174, 0.42);
+  border-radius: 8px;
+  background: #f8fafc;
+  box-shadow: 0 24px 60px rgba(17, 25, 35, 0.28);
+}
+
+.welcome-modal header {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.welcome-modal header div,
+.welcome-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.welcome-modal h2,
+.welcome-modal p {
+  margin: 0;
+}
+
 .settings-drawer {
   width: min(520px, 94vw);
   height: 100vh;
@@ -1861,6 +1897,16 @@ button {
   gap: 14px;
   padding: 14px;
   overflow: auto;
+}
+
+.welcome-config-panel .settings-edit-form {
+  max-width: 720px;
+}
+
+.welcome-config-summary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
 }
 
 .runtime-form {

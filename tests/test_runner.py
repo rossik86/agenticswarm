@@ -42,6 +42,23 @@ def test_openhands_provider_uses_configured_subprocess() -> None:
     assert result.parsed_json == {"provider": "openhands", "has_task": True}
 
 
+def test_copilot_provider_uses_configured_subprocess() -> None:
+    project_root = Path(__file__).resolve().parents[1]
+    config = load_config(project_root / "configs" / "agents.yaml")
+    config.agents["builder"].provider = "copilot"
+    config.copilot.command = sys.executable
+    config.copilot.args = [
+        "-c",
+        "import json, sys; data=sys.stdin.read(); print(json.dumps({'provider': 'copilot', 'has_task': 'Task input:' in data}))",
+    ]
+
+    runner = AgentRunner(project_root, config)
+
+    result = asyncio.run(runner.run("builder", "check copilot"))
+
+    assert result.parsed_json == {"provider": "copilot", "has_task": True}
+
+
 def test_codex_usage_parser_handles_grouped_numbers() -> None:
     assert _codex_usage("tokens used\n10\u00a0248") == {"total_tokens": 10248, "source": "codex_cli"}
 

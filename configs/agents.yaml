@@ -19,6 +19,15 @@ openhands:
     - "--help"
   timeout_seconds: 1800
 
+copilot:
+  command: gh
+  args:
+    - copilot
+    - suggest
+    - -t
+    - shell
+  timeout_seconds: 900
+
 memory:
   backend: sqlite
   path: workspace/memory.sqlite

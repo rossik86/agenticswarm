@@ -24,8 +24,10 @@ from app.dashboard import (
     render_dashboard,
     render_town,
     build_learning_improvement_prompt,
+    read_onboarding,
     mark_latest_background_failure,
     prepare_learning_improvement,
+    apply_welcome_configuration,
     update_task_template,
     update_agent_runtime_settings,
     update_global_resource,
@@ -177,6 +179,29 @@ def test_dashboard_updates_agent_runtime_settings(tmp_path: Path) -> None:
     assert config.agents["builder"].provider == "codex_cli"
     assert config.agents["builder"].model == "gpt-5.3-codex"
     assert config.agents["builder"].temperature == 0.3
+
+
+def test_welcome_configuration_applies_provider_and_model_to_all_agents(tmp_path: Path) -> None:
+    project_root = Path(__file__).resolve().parents[1]
+    config_path = tmp_path / "configs" / "agents.yaml"
+    config_path.parent.mkdir(parents=True)
+    config_path.write_text((project_root / "configs" / "agents.yaml").read_text(encoding="utf-8"), encoding="utf-8")
+
+    result = apply_welcome_configuration(
+        tmp_path,
+        config_path,
+        {"provider": "copilot", "model": "gpt-5.4-mini"},
+    )
+    config = load_config(config_path)
+    onboarding = read_onboarding(tmp_path, config)
+
+    assert result["updated"] is True
+    assert config.defaults.provider == "copilot"
+    assert config.defaults.model == "gpt-5.4-mini"
+    assert all(agent.provider == "copilot" for agent in config.agents.values())
+    assert all(agent.model == "gpt-5.4-mini" for agent in config.agents.values())
+    assert onboarding["configured"] is True
+    assert onboarding["provider"] == "copilot"
 
 
 def test_dashboard_global_skill_and_mcp_crud(tmp_path: Path) -> None:
